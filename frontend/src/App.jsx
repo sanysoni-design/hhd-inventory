@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   LayoutDashboard, Inbox, ScanLine, Boxes, ClipboardList, Settings, RefreshCw, ShieldCheck,
   X, Search, Truck, CheckCircle2, AlertTriangle, User, MapPin, Trash2, Send, LogOut, Lock, Upload,
-  ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, History, ClipboardCheck, FileDown, ScrollText,
+  ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, History, ClipboardCheck, FileDown, ScrollText, Repeat, Undo2, ArrowRightLeft, Flag, ListChecks,
 } from 'lucide-react';
 
 // @csv-start (pure helpers; tested by csv.test.mjs)
@@ -58,7 +58,7 @@ function toDevices(rows, existing = []) {
 // @csv-end
 
 // Backend URL: baked in at build time (Vercel env var VITE_API_URL). Admins may override it in the Config tab.
-const DEFAULT_URL = 'https://script.google.com/macros/s/AKfycbzZDCeSSrNqzzpaB_FYrfaUICJ9T01gDiGOWOm6zlQwPGs19nlFq6hVb8jJhbfUCTsq/exec';
+const DEFAULT_URL = 'https://script.google.com/macros/s/AKfycbyPdVZ_o7vntVeWO3GABnwtP3OzG7NqUdqtX5ZuTPW-fDQNcPDFY5xJJUv4cjxaT2OK/exec';
 const ACTIONS = ['Inter-Site Transfer', 'Handover to Service Support', 'Replacement Return from Service Support'];
 const BADGE = {
   Working: 'bg-green-100 text-green-800',
@@ -80,6 +80,7 @@ const TABS = [
   ['log', 'Status Log', History],
   ['hhdaudit', 'HHD Audit', ClipboardCheck],
   ['auditlog', 'Audit Log', ScrollText],
+  ['shift', 'Shift Handover', Repeat],
 ];
 const ADMIN_TABS = [['config', 'Config', Settings], ['admin', 'Admin', ShieldCheck]];
 
@@ -93,6 +94,19 @@ const siteList = (s) => String(s).split(',').map((x) => x.trim()).filter(Boolean
 const hasSite = (u, s) => u.role === 'admin' || u.site.trim() === '*' || siteList(u.site).includes(s);
 const avail = (c) => c.Working + c['Not-Working'] + c['Replacement Received from SS'];
 const EDITABLE = STATUSES.filter((s) => s !== 'In-Transit'); // In-Transit is only set by tickets
+const STATUS_CHOICES = EDITABLE.filter((s) => s !== 'Yet-to-be-find'); // what an auditor picks for a found device
+const OTHER = 'Other (Requires Note)';
+const FAULTS = [
+  'Cracked / Shattered Screen', 'Unresponsive Touchscreen / Keypad', 'Scratched / Damaged Scan Lens Window', 'Broken/damaged Casing',
+  'Battery Failure (Not Charging / Swollen / Rapid Drain)', 'Charging Port / Dock Pin Damage', 'Loose / Broken Scan Trigger',
+  'Liquid / Water Ingress', 'Wi-Fi / Connectivity Issue', 'Software / WMS App Freeze', 'Crush Damage',
+  'Faded / Patchy Print Quality', 'White Lines on Print (Burned-out Printhead)', 'Scratched / Damaged Thermal Printhead',
+  'Label Jam / Paper Wrapped Around Platen Roller', 'Worn / Grooved Platen Roller', 'Gap / Sensor Failure (Continuous Blank Labels Feeding)',
+  'Broken Media Cover Latch / Door Handle', 'Bluetooth Disconnection / Loss of Pairing', 'Print Job Frozen / Stalled Transmission',
+  'Battery Failure (Rapid Drain / Swollen / Loose)', 'Charging Port / DC Barrel Jack Damaged', 'Cracked / Shattered Outer Housing',
+  'Missing / Broken Belt Clip or Shoulder Strap', OTHER,
+];
+const faultText = (f, note) => (f === OTHER ? `Other: ${note.trim()}` : f);
 
 // text/plain avoids the CORS preflight that Apps Script cannot answer
 async function api(url, body) {
@@ -198,6 +212,14 @@ function MultiSelect({ label, options, value, onChange }) {
       </div>
       {open && (
         <ul className="absolute z-20 mt-1 w-full max-h-60 overflow-auto bg-white border border-slate-200 rounded-lg shadow-lg text-sm">
+          {shown.length > 0 && (
+            <li>
+              <button type="button" className="w-full text-left px-3 py-1.5 text-indigo-700 font-medium hover:bg-indigo-50"
+                onMouseDown={(e) => e.preventDefault()} onClick={() => onChange([...new Set([...value, ...shown])])}>
+                Select all {shown.length}
+              </button>
+            </li>
+          )}
           {shown.map((o) => (
             <li key={o}>
               <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer">
@@ -326,6 +348,27 @@ function Dashboard({ devices }) {
               })}
             </tbody>
           </table>
+          {(() => {
+            const nw = rows.filter((d) => rowKey(d) === drill && d.Status === 'Not-Working');
+            return nw.length ? (
+              <div className="mt-4">
+                <div className="font-semibold text-sm mb-2">Not-working devices ({nw.length})</div>
+                <table className="w-full text-sm">
+                  <thead className="text-left text-xs uppercase text-slate-500">
+                    <tr><th className="p-2">Serial</th><th className="p-2">IMEI/Device S.No</th><th className="p-2">Make / Model</th><th className="p-2">Fault reason</th></tr>
+                  </thead>
+                  <tbody>
+                    {nw.map((d) => (
+                      <tr key={d.Serial} className="border-t">
+                        <td className="p-2 font-mono">{d.Serial}</td><td className="p-2 font-mono">{d.imei_number}</td>
+                        <td className="p-2">{d.Make} {d.Model}</td><td className="p-2 text-red-700">{d.FaultReason || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null;
+          })()}
         </Modal>
       )}
     </div>
@@ -367,7 +410,7 @@ function Main({ url, setUrl, auth, logout }) {
       if (action === 'changeStatus' || action === 'changeStatusBulk') {
         const hit = new Set(action === 'changeStatus' ? [payload.serial] : payload.serials);
         const now = new Date().toISOString();
-        setData((d) => ({ ...d, devices: d.devices.map((x) => (hit.has(x.Serial) ? { ...x, Status: payload.status, LastUpdated: now } : x)) }));
+        setData((d) => ({ ...d, devices: d.devices.map((x) => (hit.has(x.Serial) ? { ...x, Status: payload.status, LastUpdated: now, FaultReason: payload.status === 'Not-Working' ? payload.fault : null } : x)) }));
       } else await load();
       return j;
     } catch (e) { fail(e); return null; }
@@ -433,6 +476,7 @@ function Main({ url, setUrl, auth, logout }) {
         {tab === 'log' && <StatusLog log={data.statusLog} devices={data.devices} />}
         {tab === 'hhdaudit' && <DeviceAudit sites={own} devices={data.devices} push={push} busy={busy} />}
         {tab === 'auditlog' && <AuditLog audits={data.audits || []} />}
+        {tab === 'shift' && <ShiftHandover site={site} users={data.users} devices={data.devices} custody={data.custody || []} logs={data.logs || []} push={push} busy={busy} flash={flash} />}
         {tab === 'config' && admin && <Config url={url} setUrl={setUrl} load={load} data={data} me={auth} flash={flash} />}
         {tab === 'admin' && admin && <Admin data={data} sites={allSites} push={push} busy={busy} flash={flash} />}
       </main>
@@ -608,6 +652,56 @@ function Dispatch({ site, sites, me, users, devices, push, busy, flash }) {
   );
 }
 
+/* ---------- Fault and status pickers (shared by every place a status can change) ---------- */
+function FaultPick({ fault, note, onFault, onNote }) {
+  return (
+    <div className="space-y-2">
+      <Select className="w-full" value={fault} onChange={(e) => onFault(e.target.value)} aria-label="Fault reason">
+        <option value="">Select fault reason…</option>{FAULTS.map((f) => <option key={f}>{f}</option>)}
+      </Select>
+      {fault === OTHER && <Input placeholder="Describe the fault *" value={note} onChange={(e) => onNote(e.target.value)} />}
+    </div>
+  );
+}
+
+// Fault reason only: used when a device is marked Not-Working
+function FaultModal({ title, onConfirm, onClose }) {
+  const [fault, setFault] = useState('');
+  const [note, setNote] = useState('');
+  const ok = fault && (fault !== OTHER || note.trim());
+  return (
+    <Modal title={title} onClose={onClose}>
+      <FaultPick fault={fault} note={note} onFault={setFault} onNote={setNote} />
+      <div className="mt-4 flex gap-3">
+        <Btn disabled={!ok} onClick={() => onConfirm(faultText(fault, note))}>Mark Not-Working</Btn>
+        <Btn onClick={onClose} className="!bg-slate-500 hover:!bg-slate-600">Cancel</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// Status plus fault reason (when Not-Working): used by the audit
+function StatusPrompt({ title, initial, onConfirm, onClose }) {
+  const [st, setSt] = useState(initial.status);
+  const [fault, setFault] = useState(initial.fault || '');
+  const [note, setNote] = useState('');
+  const bad = st === 'Not-Working' && !(fault && (fault !== OTHER || note.trim()));
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="space-y-3">
+        <Select className="w-full" value={st} onChange={(e) => setSt(e.target.value)} aria-label="Status">
+          {STATUS_CHOICES.map((s) => <option key={s}>{s}</option>)}
+        </Select>
+        {st === 'Not-Working' && <FaultPick fault={fault} note={note} onFault={setFault} onNote={setNote} />}
+      </div>
+      <div className="mt-4 flex gap-3">
+        <Btn disabled={bad} onClick={() => onConfirm({ status: st, fault: st === 'Not-Working' ? faultText(fault, note) : '' })}>Confirm</Btn>
+        <Btn onClick={onClose} className="!bg-slate-500 hover:!bg-slate-600">Cancel</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 /* ---------- Device table (Master Inventory + site list). Status editable for users with access to the device's site ---------- */
 function DeviceTable({ devices, me, push, busy, flash }) {
   const [q, setQ] = useState('');
@@ -628,13 +722,22 @@ function DeviceTable({ devices, me, push, busy, flash }) {
   const toggle = (s) => setSel((p) => { const n = new Set(p); n.has(s) ? n.delete(s) : n.add(s); return n; });
   const toggleAll = () => setSel(allSel ? new Set() : new Set(editable.map((d) => d.Serial)));
 
+  const [fp, setFp] = useState(null); // {serials, title}: fault reason needed before marking Not-Working
+  const markNotWorking = async (serials, fault) => {
+    setFp(null);
+    const j = await push('changeStatusBulk', { serials, status: 'Not-Working', fault });
+    if (j) { flash('ok', `${j.count ?? serials.length} device(s) → Not-Working (${fault})`); setSel(new Set()); setTarget(''); }
+  };
+
   const change = async (d, status) => {
+    if (status === 'Not-Working') return setFp({ serials: [d.Serial], title: `${d.Serial}: fault reason` });
     if (!window.confirm(`Change ${d.Serial} from "${d.Status}" to "${status}"?`)) return;
     if (await push('changeStatus', { serial: d.Serial, status })) flash('ok', `${d.Serial}: ${d.Status} → ${status}`);
   };
 
   const bulk = async () => {
     const serials = [...sel];
+    if (target === 'Not-Working') return setFp({ serials, title: `${serials.length} device(s): fault reason` });
     if (!window.confirm(`Change ${serials.length} device(s) to "${target}"?`)) return;
     const j = await push('changeStatusBulk', { serials, status: target });
     if (j) { flash('ok', `${j.count ?? serials.length} device(s) → ${target}`); setSel(new Set()); setTarget(''); }
@@ -660,7 +763,7 @@ function DeviceTable({ devices, me, push, busy, flash }) {
         <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
           <tr>
             <th className="p-3 w-8"><input type="checkbox" checked={allSel} onChange={toggleAll} disabled={!editable.length} aria-label="Select all" /></th>
-            <th className="p-3">Serial</th><th className="p-3">IMEI/Device S.No</th><th className="p-3">Make</th><th className="p-3">Model</th><th className="p-3">Status</th><th className="p-3">Location</th><th className="p-3">Last Updated</th>
+            <th className="p-3">Serial</th><th className="p-3">IMEI/Device S.No</th><th className="p-3">Make</th><th className="p-3">Model</th><th className="p-3">Status</th><th className="p-3">Location</th><th className="p-3">Last Updated</th><th className="p-3">Fault</th>
           </tr>
         </thead>
         <tbody>
@@ -675,13 +778,14 @@ function DeviceTable({ devices, me, push, busy, flash }) {
                   </Select>
                   : <Badge s={d.Status} />}
               </td>
-              <td className="p-3">{d.Location}</td><td className="p-3 text-slate-500">{fmt(d.LastUpdated)}</td>
+              <td className="p-3">{d.Location}</td><td className="p-3 text-slate-500">{fmt(d.LastUpdated)}</td><td className="p-3 text-xs text-red-700">{d.FaultReason}</td>
             </tr>
           ))}
-          {!rows.length && <tr><td colSpan={8} className="p-6 text-center text-slate-400">No devices</td></tr>}
+          {!rows.length && <tr><td colSpan={9} className="p-6 text-center text-slate-400">No devices</td></tr>}
         </tbody>
       </table>
       {rows.length > limit && <div className="p-4 text-center"><Btn onClick={() => setLimit(limit + 500)}>Show more ({rows.length - limit} left)</Btn></div>}
+      {fp && <FaultModal title={fp.title} onConfirm={(f) => markNotWorking(fp.serials, f)} onClose={() => setFp(null)} />}
     </Card>
   );
 }
@@ -812,12 +916,12 @@ function Admin({ data, sites, push, busy, flash }) {
       <datalist id="dl-sites">{sites.map((s) => <option key={s} value={s} />)}</datalist>
       <datalist id="dl-makes">{makes.map((s) => <option key={s} value={s} />)}</datalist>
       <datalist id="dl-models">{models.map((s) => <option key={s} value={s} />)}</datalist>
+      <UserAdmin users={users} push={push} busy={busy} flash={flash} />
       <ImportCsv devices={devices} push={push} busy={busy} flash={flash} />
       <div className="grid lg:grid-cols-2 gap-4">
-        <AddDevice push={push} busy={busy} flash={flash} />
+        <AddDevice devices={devices} push={push} busy={busy} flash={flash} />
         <AddSite push={push} busy={busy} flash={flash} />
       </div>
-      <UserAdmin users={users} push={push} busy={busy} flash={flash} />
     </div>
   );
 }
@@ -863,26 +967,49 @@ function ImportCsv({ devices, push, busy, flash }) {
   );
 }
 
-function AddDevice({ push, busy, flash }) {
+function AddDevice({ devices, push, busy, flash }) {
   const blank = { Serial: '', imei_number: '', Make: '', Model: '', Status: 'Working', Location: '' };
   const [d, setD] = useState(blank);
+  const [fault, setFault] = useState('');
+  const [note, setNote] = useState('');
+  const [look, setLook] = useState('');
   const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
+  const badFault = d.Status === 'Not-Working' && !(fault && (fault !== OTHER || note.trim()));
+  // scan or type a serial/IMEI already in the master list: fills the form from it
+  const load = () => {
+    const k = look.trim().toUpperCase();
+    if (!k) return;
+    const f = devices.find((x) => x.Serial === k) || devices.find((x) => String(x.imei_number || '').trim().toUpperCase() === k);
+    if (!f) return flash('err', `${k}: not in master list`);
+    setD({ Serial: f.Serial, imei_number: f.imei_number || '', Make: f.Make, Model: f.Model, Status: f.Status === 'In-Transit' ? 'Working' : f.Status, Location: f.Location });
+    const fr = f.FaultReason || '';
+    setFault(FAULTS.includes(fr) ? fr : fr ? OTHER : '');
+    setNote(fr && !FAULTS.includes(fr) ? fr.replace(/^Other: /, '') : '');
+    setLook('');
+  };
   const submit = async (e) => {
     e.preventDefault();
-    const j = await push('importDevices', { devices: [{ ...d, Serial: d.Serial.trim().toUpperCase() }], overwrite: true });
-    if (j) { flash('ok', `${d.Serial} saved`); setD(blank); }
+    const FaultReason = d.Status === 'Not-Working' ? faultText(fault, note) : null;
+    const j = await push('importDevices', { devices: [{ ...d, Serial: d.Serial.trim().toUpperCase(), FaultReason }], overwrite: true });
+    if (j) { flash('ok', `${d.Serial} saved`); setD(blank); setFault(''); setNote(''); }
   };
   return (
     <Card className="p-4">
       <form onSubmit={submit} className="space-y-2">
         <h2 className="font-semibold">Add / update a device</h2>
+        <div className="flex gap-2">
+          <Input placeholder="Scan serial or IMEI to load from master list" value={look} onChange={(e) => setLook(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); load(); } }} />
+          <Btn type="button" onClick={load} disabled={!look.trim()}>Load</Btn>
+        </div>
         <Input placeholder="Serial (e.g. HHD-7001)" value={d.Serial} onChange={set('Serial')} />
         <Input placeholder="IMEI (optional; may repeat across devices)" value={d.imei_number} onChange={set('imei_number')} />
         <Input placeholder="Make (type a new one to add it)" list="dl-makes" value={d.Make} onChange={set('Make')} />
         <Input placeholder="Model (type a new one to add it)" list="dl-models" value={d.Model} onChange={set('Model')} />
         <Select className="w-full" value={d.Status} onChange={set('Status')}>{EDITABLE.map((s) => <option key={s}>{s}</option>)}</Select>
+        {d.Status === 'Not-Working' && <FaultPick fault={fault} note={note} onFault={setFault} onNote={setNote} />}
         <Input placeholder="Location (site)" list="dl-sites" value={d.Location} onChange={set('Location')} />
-        <Btn type="submit" disabled={busy || !d.Serial || !d.Make || !d.Model || !d.Location}>Save device</Btn>
+        <Btn type="submit" disabled={busy || badFault || !d.Serial || !d.Make || !d.Model || !d.Location}>Save device</Btn>
       </form>
     </Card>
   );
@@ -907,32 +1034,364 @@ function AddSite({ push, busy, flash }) {
 }
 
 function UserAdmin({ users, push, busy, flash }) {
-  const blank = { username: '', name: '', role: 'user', site: '', password: '' };
+  const blank = { username: '', name: '', role: 'user', site: '', password: '', email: '' };
   const [u, setU] = useState(blank);
+  const [q, setQ] = useState('');
+  const [sort, setSort] = useState({ key: 'name', dir: 1 });
   const set = (k) => (e) => setU({ ...u, [k]: e.target.value });
   const submit = async (e) => {
     e.preventDefault();
     if (await push('saveUser', u)) { flash('ok', `User ${u.username} saved`); setU(blank); }
   };
+  // CSV columns: username, name, role, site, email, password. Existing usernames are updated; blank password keeps the old one.
+  const onCsv = async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const [h = [], ...body] = parseCSV(await f.text());
+    const col = Object.fromEntries(h.map((x, i) => [x.trim().toLowerCase(), i]));
+    const v = (r, k) => (col[k] === undefined ? '' : String(r[col[k]] || '').trim());
+    const rows = body.map((r) => ({ username: v(r, 'username'), name: v(r, 'name'), role: v(r, 'role') || 'user', site: v(r, 'site'), email: v(r, 'email'), password: v(r, 'password') }));
+    const j = await push('saveUsersBulk', { users: rows });
+    if (j) flash(j.errors.length ? 'err' : 'ok', `${j.count} user(s) saved${j.errors.length ? `, ${j.errors.length} failed: ${j.errors.slice(0, 3).join('; ')}` : ''}`);
+  };
+
+  const COLS = [['user', 'Username'], ['name', 'Name'], ['role', 'Role'], ['site', 'Site(s)'], ['email', 'Email']];
+  const rows = useMemo(() => {
+    const n = q.trim().toLowerCase();
+    return users
+      .filter((x) => !n || [x.user, x.name, x.role, x.site, x.email].some((v) => String(v || '').toLowerCase().includes(n)))
+      .sort((a, b) => String(a[sort.key] || '').localeCompare(String(b[sort.key] || ''), undefined, { sensitivity: 'base' }) * sort.dir);
+  }, [users, q, sort]);
+  const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: -s.dir } : { key, dir: 1 }));
+  const download = () => {
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const text = [COLS.map(([, l]) => l), ...rows.map((x) => [x.user, x.name, x.role, x.site, x.email])].map((r) => r.map(esc).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `HHD-Users-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
   return (
     <Card className="p-4 space-y-3">
-      <h2 className="font-semibold">Users</h2>
-      <div className="overflow-x-auto"><table className="w-full text-sm">
-        <thead className="text-left text-xs uppercase text-slate-500"><tr><th className="p-2">Username</th><th className="p-2">Name</th><th className="p-2">Role</th><th className="p-2">Site(s)</th><th /></tr></thead>
-        <tbody>{users.map((x) => (
-          <tr key={x.user} className="border-t"><td className="p-2 font-mono">{x.user}</td><td className="p-2">{x.name}</td><td className="p-2">{x.role}</td><td className="p-2">{x.site}</td>
-            <td className="p-2"><button className="text-indigo-600 hover:underline" onClick={() => setU({ username: x.user, name: x.name, role: x.role, site: x.site, password: '' })}>Edit</button></td></tr>
-        ))}</tbody>
-      </table></div>
+      <h2 className="font-semibold">Add / update user</h2>
       <form onSubmit={submit} className="grid md:grid-cols-3 gap-2">
         <Input placeholder="Username (a-z, 0-9 . _ -)" value={u.username} onChange={set('username')} />
         <Input placeholder="Full name" value={u.name} onChange={set('name')} />
         <Select value={u.role} onChange={set('role')}><option value="user">user</option><option value="admin">admin</option></Select>
         <Input placeholder='Site(s): "*" or "Site A, Site B"' list="dl-sites" value={u.site} onChange={set('site')} />
+        <Input type="email" placeholder="Email (for notifications)" value={u.email} onChange={set('email')} />
         <Input type="password" autoComplete="new-password" placeholder="Password (min 10; blank = keep)" value={u.password} onChange={set('password')} />
         <Btn type="submit" disabled={busy || !u.username || !u.name || !u.site}>Save user</Btn>
       </form>
+      <div className="flex flex-wrap items-center gap-3 border-t pt-3">
+        <span className="text-sm text-slate-600">Bulk add / update (CSV):</span>
+        <input type="file" accept=".csv,text/csv" onChange={onCsv} disabled={busy} className="text-sm" />
+        <span className="text-xs text-slate-500">Columns: username, name, role, site, email, password</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-3 border-t pt-3">
+        <div className="relative flex-1 min-w-[200px]"><Search size={16} className="absolute left-3 top-2.5 text-slate-400" />
+          <Input className="pl-9" placeholder="Search name, username, email, site, role…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <span className="text-sm text-slate-500">{rows.length} of {users.length}</span>
+        <Btn type="button" onClick={download} disabled={!rows.length}><FileDown size={16} /> Download list (CSV)</Btn>
+      </div>
+      <div className="max-h-96 overflow-auto border rounded-lg">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-slate-50 text-left text-xs uppercase text-slate-500">
+            <tr>
+              {COLS.map(([key, label]) => {
+                const Icon = sort.key !== key ? ArrowUpDown : sort.dir === 1 ? ArrowUp : ArrowDown;
+                return (
+                  <th key={key} className="p-2" aria-sort={sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
+                    <button type="button" onClick={() => toggleSort(key)} className="inline-flex items-center gap-1 uppercase hover:text-indigo-600">
+                      {label} <Icon size={12} className={sort.key === key ? 'text-indigo-600' : 'opacity-40'} />
+                    </button>
+                  </th>
+                );
+              })}
+              <th />
+            </tr>
+          </thead>
+          <tbody>{rows.map((x) => (
+            <tr key={x.user} className="border-t"><td className="p-2 font-mono">{x.user}</td><td className="p-2">{x.name}</td><td className="p-2">{x.role}</td><td className="p-2">{x.site}</td><td className="p-2">{x.email}</td>
+              <td className="p-2"><button className="text-indigo-600 hover:underline" onClick={() => setU({ username: x.user, name: x.name, role: x.role, site: x.site, email: x.email || '', password: '' })}>Edit</button></td></tr>
+          ))}
+            {!rows.length && <tr><td colSpan={6} className="p-6 text-center text-slate-400">No users match</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </Card>
+  );
+}
+
+const HO_MODES = [
+  ['checkout', 'Checkout (shift start)', Repeat],
+  ['checkin', 'Check-in (shift end)', Undo2],
+  ['swap', 'Mid-shift swap', ArrowRightLeft],
+  ['redtag', 'Red tag', Flag],
+  ['recon', 'Reconciliation', ListChecks],
+  ['history', 'Device history', History],
+];
+const HO_HELD = ['issued', 'overdue', 'missing'];
+const HO_EVENT = { issued: 'Issued', returned: 'Returned', returned_late: 'Returned late', returned_damaged: 'Returned damaged', swap_out: 'Swap out', swap_in: 'Swap in', flagged: 'Red-tagged' };
+// fixed, location-independent shifts; end times are set by the server
+const SHIFT_OPTS = [['A', 'Shift A (ends 15:00)'], ['B', 'Shift B (ends 23:00)'], ['C', 'Shift C (ends 07:00)'], ['G', 'General (ends 19:00)']];
+
+function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash }) {
+  const [mode, setMode] = useState('checkout');
+  const [shiftId, setShiftId] = useState('');
+  const [assign, setAssign] = useState({});   // checkout: serial -> worker user
+  const [toUser, setToUser] = useState('');   // swap: receiving worker
+  const [scan, setScan] = useState('');
+  const [queue, setQueue] = useState([]);     // serials, in scan order
+  const [insp, setInsp] = useState({});       // serial -> {result, fault, note}
+  const [newDevs, setNewDevs] = useState({}); // serial -> {Make, Model, imei} for devices not yet in master list
+  const [newDev, setNewDev] = useState(null); // dialog state for a brand-new device
+  const [hq, setHq] = useState('');
+  const byS = useMemo(() => Object.fromEntries(devices.map((d) => [d.Serial, d])), [devices]);
+  const byC = useMemo(() => Object.fromEntries(custody.map((c) => [c.Serial, c])), [custody]);
+  const byImei = useMemo(() => {
+    const m = {};
+    devices.forEach((d) => { const k = String(d.imei_number || '').trim().toUpperCase(); if (k) (m[k] ||= []).push(d); });
+    return m;
+  }, [devices]);
+  const nameOf = useMemo(() => Object.fromEntries(users.map((u) => [u.user, u.name])), [users]);
+  const people = users.filter((u) => hasSite(u, site));
+  const now = Date.now();
+  const live = (c) => (c.Status === 'issued' && new Date(c.DueAt) < now ? 'overdue' : c.Status);
+  const who = (un) => (un ? nameOf[un] || un : '—');
+
+  useEffect(() => { setQueue([]); setInsp({}); setAssign({}); setNewDevs({}); }, [mode, site]);
+
+  // scan a serial or IMEI. An unknown code at checkout opens the new-device dialog; elsewhere it is an error.
+  const add = () => {
+    const code = scan.trim().toUpperCase();
+    setScan('');
+    if (!code) return;
+    const hits = byS[code] ? [byS[code]] : byImei[code] || [];
+    if (hits.length > 1) return flash('err', `${code}: IMEI shared by ${hits.length} devices, scan the serial`);
+    if (!hits.length) {
+      if (mode !== 'checkout') return flash('err', `${code}: not in master stock`);
+      return setNewDev({ Serial: code, Make: '', Model: '', imei: '' });
+    }
+    const s = hits[0].Serial;
+    if (queue.includes(s)) return flash('err', `${s}: already in queue`);
+    setQueue((q) => [...q, s]);
+  };
+
+  const saveNewDev = () => {
+    const s = newDev.Serial;
+    setNewDevs((m) => ({ ...m, [s]: { Make: newDev.Make.trim(), Model: newDev.Model.trim(), imei: newDev.imei.trim() } }));
+    setQueue((q) => (q.includes(s) ? q : [...q, s]));
+    setNewDev(null);
+  };
+
+  // red tag is always damaged; check-in is damaged only if the inspector says so
+  const isDamaged = (s) => mode === 'redtag' || insp[s]?.result === 'damaged';
+  const faultMissing = (s) => isDamaged(s) && !(insp[s]?.fault && (insp[s].fault !== OTHER || insp[s]?.note?.trim()));
+  const swapFrom = queue.length ? byC[queue[0]]?.HolderUser || '' : '';
+  const ready = !busy && queue.length > 0 && !queue.some(faultMissing)
+    && (mode === 'redtag' || shiftId !== '')
+    && (mode !== 'checkout' || queue.every((s) => assign[s]))
+    && (mode !== 'swap' || toUser !== '')
+    && !(mode === 'checkout' && queue.some((s) => insp[s]?.result === 'damaged'));
+
+  // one save for the whole batch; the server issues each device to the worker chosen on its row
+  const submit = async () => {
+    const inspections = Object.fromEntries(queue.map((s) => {
+      const i = insp[s] || {};
+      const dmg = isDamaged(s);
+      return [s, { result: dmg ? 'damaged' : 'ok', fault: dmg ? faultText(i.fault || '', i.note || '') : '', notes: i.note || '' }];
+    }));
+    let j = null, msg = '';
+    if (mode === 'checkout') {
+      const fresh = Object.fromEntries(queue.filter((s) => newDevs[s]).map((s) => [s, newDevs[s]]));
+      j = await push('shiftIssue', { site, shiftId, assignments: Object.fromEntries(queue.map((s) => [s, assign[s]])), inspections, newDevices: fresh });
+      msg = `Issued ${queue.length} device(s) to ${new Set(queue.map((s) => assign[s])).size} worker(s)`;
+    }
+    if (mode === 'checkin') { j = await push('shiftReturn', { site, shiftId, serials: queue, inspections }); msg = `Checked in ${queue.length} device(s)`; }
+    if (mode === 'swap') { j = await push('shiftSwap', { site, shiftId, toUser, serials: queue }); msg = `Swapped ${queue.length} device(s)`; }
+    if (mode === 'redtag') { j = await push('flagRedTag', { site, serials: queue, inspections }); msg = `Red-tagged ${queue.length} device(s)`; }
+    if (j) { flash('ok', msg); setQueue([]); setInsp({}); setAssign({}); setNewDevs({}); }
+  };
+
+  const setI = (s, patch) => setInsp((x) => ({ ...x, [s]: { ...(x[s] || {}), ...patch } }));
+  const applyAll = (u) => setAssign(Object.fromEntries(queue.map((s) => [s, u])));
+
+  const rows = custody.filter((c) => c.Site === site).map((c) => ({ ...c, Live: live(c) }));
+  const hRows = useMemo(() => {
+    const n = hq.trim().toLowerCase();
+    return logs
+      .map((l) => ({ ...l, imei: byS[l.Serial]?.imei_number || '' }))
+      .filter((l) => !n || [l.Serial, l.imei, l.Location, who(l.FromUser), who(l.ToUser), who(l.ByUser)].some((v) => String(v || '').toLowerCase().includes(n)));
+  }, [logs, byS, hq, nameOf]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {HO_MODES.map(([id, label, Icon]) => (
+          <button key={id} onClick={() => setMode(id)}
+            className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm border ${mode === id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-300'}`}>
+            <Icon size={16} /> {label}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'history' && (
+        <div className="space-y-3">
+          <Card className="p-4">
+            <div className="relative"><Search size={16} className="absolute left-3 top-2.5 text-slate-400" />
+              <Input className="pl-9" placeholder="Search serial, IMEI, location or person…" value={hq} onChange={(e) => setHq(e.target.value)} /></div>
+          </Card>
+          <Card className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                <tr><th className="p-3">When</th><th className="p-3">Device</th><th className="p-3">Event</th><th className="p-3">Location</th><th className="p-3">From</th><th className="p-3">To</th><th className="p-3">By</th></tr>
+              </thead>
+              <tbody>
+                {hRows.slice(0, 300).map((l) => (
+                  <tr key={l.Id} className="border-t">
+                    <td className="p-3 text-slate-500 whitespace-nowrap">{fmt(l.At)}</td>
+                    <td className="p-3"><div className="font-mono">{l.Serial}</div><div className="text-xs text-slate-500 font-mono">{l.imei}</div></td>
+                    <td className="p-3">{HO_EVENT[l.Event] || l.Event}</td>
+                    <td className="p-3">{l.Location || '—'}</td>
+                    <td className="p-3">{who(l.FromUser)}</td>
+                    <td className="p-3 font-semibold">{who(l.ToUser)}</td>
+                    <td className="p-3 text-slate-500">{who(l.ByUser)}</td>
+                  </tr>
+                ))}
+                {!hRows.length && <tr><td colSpan={7} className="p-6 text-center text-slate-400">No history</td></tr>}
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
+
+      {mode === 'recon' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Card className="p-3"><div className="text-xs text-slate-500">Issued</div><div className="text-2xl font-bold">{rows.filter((r) => r.Live === 'issued').length}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">Returned</div><div className="text-2xl font-bold">{rows.filter((r) => r.Live === 'returned').length}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">Overdue / Missing</div><div className="text-2xl font-bold text-red-700">{rows.filter((r) => ['overdue', 'missing'].includes(r.Live)).length}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">Under Maintenance</div><div className="text-2xl font-bold text-orange-700">{rows.filter((r) => r.Live === 'maintenance').length}</div></Card>
+          </div>
+          <Card className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                <tr><th className="p-3">Serial</th><th className="p-3">Location</th><th className="p-3">Holder</th><th className="p-3">Issued</th><th className="p-3">Shift end</th><th className="p-3">Status</th></tr>
+              </thead>
+              <tbody>
+                {rows.filter((r) => r.Live !== 'returned').map((r) => (
+                  <tr key={r.Serial} className="border-t">
+                    <td className="p-3 font-mono">{r.Serial}</td><td className="p-3">{r.Site}</td>
+                    <td className="p-3">{r.HolderName} <span className="text-slate-500">({r.HolderUser})</span></td>
+                    <td className="p-3 text-slate-500">{fmt(r.IssuedAt)}</td><td className="p-3 text-slate-500">{fmt(r.DueAt)}</td>
+                    <td className="p-3 text-xs font-medium">{r.Live}</td>
+                  </tr>
+                ))}
+                {!rows.some((r) => r.Live !== 'returned') && <tr><td colSpan={6} className="p-6 text-center text-slate-400">Nothing outstanding</td></tr>}
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
+
+      {mode !== 'recon' && mode !== 'history' && (
+        <>
+          <Card className="p-4 grid md:grid-cols-3 gap-3">
+            {mode !== 'redtag' && (
+              <Select value={shiftId} onChange={(e) => setShiftId(e.target.value)} aria-label="Shift">
+                <option value="">Select shift…</option>
+                {SHIFT_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </Select>
+            )}
+            {mode === 'checkout' && queue.length > 0 && (
+              <Select value="" onChange={(e) => e.target.value && applyAll(e.target.value)} aria-label="Issue all to">
+                <option value="">Issue all queued to…</option>
+                {people.map((u) => <option key={u.user} value={u.user}>{u.name} ({u.user})</option>)}
+              </Select>
+            )}
+            {mode === 'swap' && (
+              <Select value={toUser} onChange={(e) => setToUser(e.target.value)} aria-label="Receiving worker">
+                <option value="">Receiving worker…</option>
+                {people.filter((u) => u.user !== swapFrom).map((u) => <option key={u.user} value={u.user}>{u.name} ({u.user})</option>)}
+              </Select>
+            )}
+            <div className="flex gap-2 md:col-span-3">
+              <Input autoFocus placeholder="Scan serial or IMEI, press Enter" value={scan} onChange={(e) => setScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+              <Btn onClick={add} disabled={!scan.trim()}>Add</Btn>
+            </div>
+          </Card>
+
+          <Card className="p-4 space-y-3">
+            <div className="flex justify-between items-center">
+              <h2 className="font-semibold">Queue ({queue.length})</h2>
+              {queue.length > 0 && <button className="text-xs text-red-600" onClick={() => { setQueue([]); setInsp({}); setAssign({}); setNewDevs({}); }}>Clear all</button>}
+            </div>
+            {queue.length > 0 && mode === 'swap' && <div className="text-sm text-slate-600">Holder: <b>{swapFrom || '—'}</b>. Supervisor approval is recorded with this swap.</div>}
+            <div className="divide-y">
+              {queue.map((s) => {
+                const isNew = !byS[s];
+                const d = byS[s] || { Make: newDevs[s]?.Make, Model: newDevs[s]?.Model, imei_number: newDevs[s]?.imei };
+                const c = byC[s];
+                return (
+                  <div key={s} className="py-3 grid md:grid-cols-2 gap-3 items-start">
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between gap-2">
+                        <span className="font-mono font-semibold">{s}{isNew && <span className="ml-2 text-xs bg-blue-100 text-blue-800 rounded px-1.5">new</span>}</span>
+                        <button onClick={() => setQueue((q) => q.filter((x) => x !== s))} aria-label={`Remove ${s}`} className="text-red-500 text-xs">Remove</button>
+                      </div>
+                      <div className="text-slate-600">IMEI/S.No: <span className="font-mono">{d.imei_number || '—'}</span> · {d.Make} {d.Model}</div>
+                      {c && HO_HELD.includes(c.Status) && <div className="text-amber-700 text-xs">Currently held by {c.HolderName}{mode === 'checkout' ? ': use swap' : ''}</div>}
+                      {!isNew && d.Location && d.Location !== site && <div className="text-blue-700 text-xs">Will move from {d.Location} to {site}</div>}
+                      {(mode === 'checkin' || mode === 'checkout') && (
+                        <Select value={insp[s]?.result || 'ok'} onChange={(e) => setI(s, { result: e.target.value })} aria-label={`Inspection of ${s}`}>
+                          <option value="ok">OK</option>
+                          {mode === 'checkin' && <option value="damaged">Damaged</option>}
+                        </Select>
+                      )}
+                      {mode === 'checkout' && <div className="text-xs text-slate-500">Damaged devices cannot be issued: use Red tag.</div>}
+                      {isDamaged(s) && mode !== 'swap' && (
+                        <FaultPick fault={insp[s]?.fault || ''} note={insp[s]?.note || ''} onFault={(v) => setI(s, { fault: v })} onNote={(v) => setI(s, { note: v })} />
+                      )}
+                    </div>
+                    <div className="text-sm">
+                      {mode === 'checkout' && (
+                        <Select className="w-full" value={assign[s] || ''} onChange={(e) => setAssign((a) => ({ ...a, [s]: e.target.value }))} aria-label={`Worker for ${s}`}>
+                          <option value="">Issue to…</option>
+                          {people.map((u) => <option key={u.user} value={u.user}>{u.name} ({u.user})</option>)}
+                        </Select>
+                      )}
+                      {mode === 'swap' && <div className="text-slate-600">From: <b>{c?.HolderName || '—'}</b></div>}
+                    </div>
+                  </div>
+                );
+              })}
+              {!queue.length && <div className="py-8 text-center text-slate-400">Nothing scanned yet.</div>}
+            </div>
+            <Btn disabled={!ready} onClick={submit} className="w-full">
+              {mode === 'checkout' ? `Issue ${queue.length} device(s)` : mode === 'checkin' ? 'Check in devices' : mode === 'swap' ? 'Record swap' : 'Submit red tag'}
+            </Btn>
+          </Card>
+        </>
+      )}
+
+      {newDev && (
+        <Modal title="New device: add to master list" onClose={() => setNewDev(null)}>
+          <div className="space-y-2">
+            <Input value={newDev.Serial} readOnly className="font-mono bg-slate-100" aria-label="Serial" />
+            <Input placeholder="Make *" autoFocus value={newDev.Make} onChange={(e) => setNewDev({ ...newDev, Make: e.target.value })} />
+            <Input placeholder="Model *" value={newDev.Model} onChange={(e) => setNewDev({ ...newDev, Model: e.target.value })} />
+            <Input placeholder="IMEI / Device S.No (optional)" value={newDev.imei} onChange={(e) => setNewDev({ ...newDev, imei: e.target.value })} />
+          </div>
+          <div className="mt-4 flex gap-3">
+            <Btn onClick={saveNewDev} disabled={!newDev.Make.trim() || !newDev.Model.trim()}>Add and queue</Btn>
+            <Btn onClick={() => setNewDev(null)} className="!bg-slate-500 hover:!bg-slate-600">Cancel</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
   );
 }
 
@@ -1011,12 +1470,16 @@ function AuditSummary({ items, missing, at }) {
 
 function DeviceAudit({ sites, devices, push, busy }) {
   const [loc, setLoc] = useState('');
+  const [q, setQ] = useState(''); // what is typed in the location box; loc only holds an exact site name
   const [scan, setScan] = useState('');
   const [rows, setRows] = useState([]);   // accepted scans: {Serial, Type, From, Make, Model}
   const [warn, setWarn] = useState(null); // device registered elsewhere, awaiting confirm
+  const [newDev, setNewDev] = useState(null); // unknown code scanned: details to capture {Serial, Make, Model, imei}
+  const [prompt, setPrompt] = useState(null); // status prompt: {serial, title, initial}
   const [note, setNote] = useState('');
   const [review, setReview] = useState(false);
   const [done, setDone] = useState(null);
+  const [remarks, setRemarks] = useState(''); // auditor's observations, shown in the audit mail
   const inp = useRef(null);
   const timer = useRef(null); // auto-submit timer for scanned codes
   const byS = useMemo(() => Object.fromEntries(devices.map((d) => [d.Serial, d])), [devices]);
@@ -1026,7 +1489,7 @@ function DeviceAudit({ sites, devices, push, busy }) {
     return m;
   }, [devices]);
   const focus = () => setTimeout(() => inp.current?.focus(), 0);
-  useEffect(() => { setRows([]); setNote(''); if (loc) focus(); }, [loc]);
+  useEffect(() => { setRows([]); setNote(''); setNewDev(null); if (loc) focus(); }, [loc]);
 
   const add = (raw = scan) => {
     clearTimeout(timer.current);
@@ -1037,13 +1500,13 @@ function DeviceAudit({ sites, devices, push, busy }) {
     const hits = byS[s] ? [byS[s]] : byImei[s] || [];
     const free = hits.filter((x) => !rows.some((r) => r.Serial === x.Serial));
     if (hits.length ? !free.length : rows.some((r) => r.Serial === s)) return setNote(`${s}: already scanned`);
-    if (!hits.length) return setRows((r) => [{ Serial: s, Type: 'New', Make: 'Unknown', Model: 'Unknown' }, ...r]);
+    if (!hits.length) return setNewDev({ Serial: s, Make: '', Model: '', imei: '', Status: 'Working', fault: '', note: '' }); // capture details first
     // ponytail: a shared IMEI takes the first unscanned device at this location; elsewhere only if unambiguous
     const d = free.find((x) => x.Location === loc) || (free.length === 1 ? free[0] : null);
     if (!d) return setNote(`${s}: IMEI shared by ${free.length} devices at other locations, scan the serial instead`);
     if (inTransit(d)) return setNote(`${d.Serial}: in transit, acknowledge its ticket first`);
     if (d.Location !== loc) return setWarn(d);
-    setRows((r) => [{ Serial: d.Serial, imei: d.imei_number, Type: 'Reconciled', Make: d.Make, Model: d.Model }, ...r]);
+    addRow(d, 'Reconciled');
   };
   // a known serial/IMEI submits itself shortly after the last character, so scanners need no Enter.
   // Unknown codes still wait for Enter. Enter still works and cancels the timer.
@@ -1053,10 +1516,20 @@ function DeviceAudit({ sites, devices, push, busy }) {
     if (k && (byS[k] || byImei[k])) timer.current = setTimeout(() => add(v), 250);
   };
   const reassign = () => {
-    setRows((r) => [{ Serial: warn.Serial, imei: warn.imei_number, Type: 'Transferred', From: warn.Location, Make: warn.Make, Model: warn.Model }, ...r]);
+    addRow(warn, 'Transferred');
     setWarn(null); focus();
   };
   const cancel = () => { setWarn(null); focus(); };
+  // every scanned device gets a row carrying its current status; a found missing device is prompted for its status
+  const addRow = (d, type) => {
+    setRows((r) => [{ Serial: d.Serial, imei: d.imei_number, Type: type, From: type === 'Transferred' ? d.Location : '', Make: d.Make, Model: d.Model, Status: d.Status, Fault: d.FaultReason || '' }, ...r]);
+    if (d.Status === 'Yet-to-be-find') setPrompt({ serial: d.Serial, title: `${d.Serial} found: select its status`, initial: { status: 'Working', fault: '' } });
+  };
+  const saveNew = () => {
+    const Fault = newDev.Status === 'Not-Working' ? faultText(newDev.fault, newDev.note) : '';
+    setRows((r) => [{ Serial: newDev.Serial, imei: newDev.imei.trim(), Type: 'New', Make: newDev.Make.trim(), Model: newDev.Model.trim(), Status: newDev.Status, Fault }, ...r]);
+    setNewDev(null); focus();
+  };
 
   const missing = useMemo(() => {
     const seen = new Set(rows.map((r) => r.Serial));
@@ -1065,19 +1538,21 @@ function DeviceAudit({ sites, devices, push, busy }) {
 
   // Nothing is written until here. The server re-derives each result and saves the audit.
   const commit = async () => {
-    const j = await push('auditComplete', { site: loc, serials: rows.map((r) => r.Serial) });
-    if (j) { setReview(false); setRows([]); setDone(j); exportAudit(j); }
+    const newDevices = Object.fromEntries(rows.filter((r) => r.Type === 'New').map((r) => [r.Serial, { Make: r.Make, Model: r.Model, imei: r.imei || '' }]));
+    const updates = Object.fromEntries(rows.map((r) => [r.Serial, { status: r.Status, fault: r.Fault }]));
+    const j = await push('auditComplete', { site: loc, serials: rows.map((r) => r.Serial), newDevices, updates, remarks: remarks.trim() });
+    if (j) { setReview(false); setRows([]); setRemarks(''); setDone(j); exportAudit(j); }
   };
 
   return (
     <div className="space-y-4">
       <Card className="p-4 space-y-3">
         <h2 className="font-semibold">HHD Device Audit</h2>
-        <Select value={loc} onChange={(e) => setLoc(e.target.value)} className="w-full">
-          <option value="">Select audit location…</option>{sites.map((s) => <option key={s}>{s}</option>)}
-        </Select>
+        <Input list="dl-audit-sites" value={q} placeholder="Type to search audit location…"
+          onChange={(e) => { const v = e.target.value; setQ(v); setLoc(sites.includes(v) ? v : ''); }} />
+        <datalist id="dl-audit-sites">{sites.map((s) => <option key={s} value={s} />)}</datalist>
         <div className="flex gap-2">
-          <input ref={inp} disabled={!loc || !!warn} value={scan} onChange={(e) => onScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()}
+          <input ref={inp} disabled={!loc || !!warn || !!newDev || !!prompt} value={scan} onChange={(e) => onScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()}
             placeholder={loc ? 'Scan serial or IMEI, press Enter' : 'Pick a location first'}
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:bg-slate-100" />
           <Btn onClick={() => add()} disabled={!loc || !scan.trim()}>Add</Btn>
@@ -1088,13 +1563,20 @@ function DeviceAudit({ sites, devices, push, busy }) {
       <Card className="p-4 space-y-3">
         <div className="flex justify-between items-center">
           <h2 className="font-semibold">Scanned ({rows.length})</h2>
-          <Btn disabled={!rows.length || busy} onClick={() => setReview(true)}><CheckCircle2 size={16} /> Complete Audit</Btn>
+          <Btn disabled={!rows.length || busy || rows.some((r) => r.Status === 'Yet-to-be-find')} onClick={() => setReview(true)}><CheckCircle2 size={16} /> Complete Audit</Btn>
         </div>
         <div className="max-h-96 overflow-auto divide-y">
           {rows.map((r) => (
             <div key={r.Serial} className={`py-2 px-1 text-sm flex justify-between ${r.Type === 'Transferred' ? 'bg-red-50' : ''}`}>
               <span><span className="font-mono">{r.Serial}</span> <span className="text-slate-500">{r.Make} {r.Model}{r.imei && ` · IMEI ${r.imei}`}{r.From && ` · from ${r.From}`}</span></span>
               <span className="flex items-center gap-2">
+                {r.Fault && <span className="text-xs text-red-700 max-w-[14rem] truncate" title={r.Fault}>{r.Fault}</span>}
+                <Select className="!py-1" value={r.Status} aria-label={`Status of ${r.Serial}`}
+                  onChange={(e) => (e.target.value === 'Not-Working'
+                    ? setPrompt({ serial: r.Serial, title: `${r.Serial}: fault reason`, initial: { status: 'Not-Working', fault: r.Fault } })
+                    : setRows((x) => x.map((y) => (y.Serial === r.Serial ? { ...y, Status: e.target.value, Fault: '' } : y))))}>
+                  {EDITABLE.map((s) => <option key={s}>{s}</option>)}
+                </Select>
                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${TYPE_BADGE[r.Type]}`}>{r.Type}</span>
                 <button onClick={() => setRows((x) => x.filter((y) => y.Serial !== r.Serial))} aria-label={`Remove ${r.Serial}`} className="text-red-500"><Trash2 size={16} /></button>
               </span>
@@ -1117,9 +1599,43 @@ function DeviceAudit({ sites, devices, push, busy }) {
         </Modal>
       )}
 
+      {prompt && (
+        <StatusPrompt title={prompt.title} initial={prompt.initial}
+          onConfirm={(c) => { setRows((rs) => rs.map((r) => (r.Serial === prompt.serial ? { ...r, Status: c.status, Fault: c.fault } : r))); setPrompt(null); focus(); }}
+          onClose={() => { setPrompt(null); focus(); }} />
+      )}
+
+      {newDev && (
+        <Modal title="New device found: capture details" onClose={() => { setNewDev(null); focus(); }}>
+          <div className="space-y-2">
+            <Input value={newDev.Serial} readOnly className="font-mono bg-slate-100" aria-label="Serial" />
+            <Input placeholder="Make *" autoFocus value={newDev.Make} onChange={(e) => setNewDev({ ...newDev, Make: e.target.value })} />
+            <Input placeholder="Model *" value={newDev.Model} onChange={(e) => setNewDev({ ...newDev, Model: e.target.value })} />
+            <Input placeholder="IMEI / Device S.No (optional)" value={newDev.imei} onChange={(e) => setNewDev({ ...newDev, imei: e.target.value })} />
+            <Select className="w-full" value={newDev.Status} onChange={(e) => setNewDev({ ...newDev, Status: e.target.value })} aria-label="Status">
+              {STATUS_CHOICES.map((s) => <option key={s}>{s}</option>)}
+            </Select>
+            {newDev.Status === 'Not-Working' && (
+              <FaultPick fault={newDev.fault} note={newDev.note}
+                onFault={(v) => setNewDev({ ...newDev, fault: v })} onNote={(v) => setNewDev({ ...newDev, note: v })} />
+            )}
+          </div>
+          <div className="mt-4 flex gap-3">
+            <Btn onClick={saveNew} disabled={!newDev.Make.trim() || !newDev.Model.trim() || (newDev.Status === 'Not-Working' && !(newDev.fault && (newDev.fault !== OTHER || newDev.note.trim())))}>Add to audit</Btn>
+            <Btn onClick={() => { setNewDev(null); focus(); }} className="!bg-slate-500 hover:!bg-slate-600">Cancel</Btn>
+          </div>
+        </Modal>
+      )}
+
       {review && (
         <Modal title={`Audit summary — ${loc}`} onClose={() => setReview(false)}>
           <AuditSummary items={rows} missing={missing} />
+          <div className="mt-4">
+            <label className="text-sm font-medium" htmlFor="audit-remarks">Auditor remarks (observations)</label>
+            <textarea id="audit-remarks" rows={3} value={remarks} onChange={(e) => setRemarks(e.target.value)}
+              placeholder="Anything the audit should record, e.g. condition of the store, pending items…"
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+          </div>
           <p className="text-sm text-slate-600 mt-3">On confirm: {missing.length} missing device(s) are set to Yet-to-be-find, and {rows.filter((r) => r.Type === 'Transferred').length} transferred device(s) move to {loc}.</p>
           <div className="mt-4"><Btn onClick={commit} disabled={busy}><FileDown size={16} /> Confirm, Save & Download PDF + CSV</Btn></div>
         </Modal>
@@ -1204,12 +1720,12 @@ function AuditLog({ audits }) {
 /* ---------- Master list CSV for one or more sites (in-transit devices included for sites they were sent from) ---------- */
 function saveMaster(devices, tickets, sites) {
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const cols = ['Serial', 'IMEI/Device S.No', 'Make', 'Model', 'Status', 'Location', 'Last Updated', 'Last Audited'];
+  const cols = ['Serial', 'IMEI/Device S.No', 'Make', 'Model', 'Status', 'Fault', 'Location', 'Last Updated', 'Last Audited'];
   // in-transit devices keep no origin site, so take them from pending tickets sent from the selected sites
   const leaving = new Set(tickets.filter((t) => sites.includes(t.SenderSite) && t.Status === 'Pending Receipt').flatMap(serialsOf));
   const rows = devices.filter((d) => sites.includes(d.Location) || (inTransit(d) && leaving.has(d.Serial)))
     .sort((a, b) => String(a.Location).localeCompare(String(b.Location)) || String(a.Serial).localeCompare(String(b.Serial)))
-    .map((d) => [d.Serial, d.imei_number || '', d.Make, d.Model, d.Status, d.Location, d.LastUpdated || '', d.LastAudited || '']);
+    .map((d) => [d.Serial, d.imei_number || '', d.Make, d.Model, d.Status, d.FaultReason || '', d.Location, d.LastUpdated || '', d.LastAudited || '']);
   const text = [cols, ...rows].map((r) => r.map(q).join(',')).join('\r\n');
   const url = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' })); // BOM so Excel reads UTF-8
   const name = sites.length === 1 ? sites[0] : `${sites.length}-sites`;
