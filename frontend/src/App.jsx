@@ -58,7 +58,7 @@ function toDevices(rows, existing = []) {
 // @csv-end
 
 // Backend URL: baked in at build time (Vercel env var VITE_API_URL). Admins may override it in the Config tab.
-const DEFAULT_URL = 'https://script.google.com/macros/s/AKfycbyPdVZ_o7vntVeWO3GABnwtP3OzG7NqUdqtX5ZuTPW-fDQNcPDFY5xJJUv4cjxaT2OK/exec';
+const DEFAULT_URL = import.meta.env.VITE_API_URL || '';
 const ACTIONS = ['Inter-Site Transfer', 'Handover to Service Support', 'Replacement Return from Service Support'];
 const BADGE = {
   Working: 'bg-green-100 text-green-800',
