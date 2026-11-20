@@ -411,7 +411,7 @@ function Main({ url, setUrl, auth, logout }) {
         const hit = new Set(action === 'changeStatus' ? [payload.serial] : payload.serials);
         const now = new Date().toISOString();
         setData((d) => ({ ...d, devices: d.devices.map((x) => (hit.has(x.Serial) ? { ...x, Status: payload.status, LastUpdated: now, FaultReason: payload.status === 'Not-Working' ? payload.fault : null } : x)) }));
-      } else await load();
+      } else if (action !== 'lookupGC') await load();
       return j;
     } catch (e) { fail(e); return null; }
     finally { setBusy(false); }
@@ -1141,13 +1141,12 @@ const SHIFT_OPTS = [['A', 'Shift A (ends 15:00)'], ['B', 'Shift B (ends 23:00)']
 function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash }) {
   const [mode, setMode] = useState('checkout');
   const [shiftId, setShiftId] = useState('');
-  const [assign, setAssign] = useState({});   // checkout: serial -> worker user
   const [toUser, setToUser] = useState('');   // swap: receiving worker
+  const [gcScan, setGcScan] = useState('');
+  const [selectedGc, setSelectedGc] = useState(null);
   const [scan, setScan] = useState('');
   const [queue, setQueue] = useState([]);     // serials, in scan order
   const [insp, setInsp] = useState({});       // serial -> {result, fault, note}
-  const [newDevs, setNewDevs] = useState({}); // serial -> {Make, Model, imei} for devices not yet in master list
-  const [newDev, setNewDev] = useState(null); // dialog state for a brand-new device
   const [hq, setHq] = useState('');
   const byS = useMemo(() => Object.fromEntries(devices.map((d) => [d.Serial, d])), [devices]);
   const byC = useMemo(() => Object.fromEntries(custody.map((c) => [c.Serial, c])), [custody]);
@@ -1162,29 +1161,35 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
   const live = (c) => (c.Status === 'issued' && new Date(c.DueAt) < now ? 'overdue' : c.Status);
   const who = (un) => (un ? nameOf[un] || un : '—');
 
-  useEffect(() => { setQueue([]); setInsp({}); setAssign({}); setNewDevs({}); }, [mode, site]);
+  useEffect(() => { setQueue([]); setInsp({}); setSelectedGc(null); setGcScan(''); }, [mode, site]);
 
-  // scan a serial or IMEI. An unknown code at checkout opens the new-device dialog; elsewhere it is an error.
+  // GC card can carry either Employee ID or Valinor ID; the backend validates both against the GC master.
+  const scanGC = async () => {
+    const code = gcScan.trim().toUpperCase();
+    if (!code) return;
+    setGcScan('');
+    const j = await push('lookupGC', { gcId: code, site });
+    if (j?.gc) {
+      if (selectedGc && selectedGc.EmployeeID !== j.gc.EmployeeID && queue.length) {
+        return flash('err', 'Clear the current HHD queue before switching to another GC');
+      }
+      setSelectedGc(j.gc);
+      flash('ok', `GC verified: ${j.gc.Name} (${j.gc.EmployeeID})`);
+    }
+  };
+
+  // scan a serial or IMEI. Handover requires a valid GC to be scanned first.
   const add = () => {
     const code = scan.trim().toUpperCase();
     setScan('');
     if (!code) return;
+    if (mode === 'checkout' && !selectedGc) return flash('err', 'Scan and verify the GC ID before scanning an HHD');
     const hits = byS[code] ? [byS[code]] : byImei[code] || [];
     if (hits.length > 1) return flash('err', `${code}: IMEI shared by ${hits.length} devices, scan the serial`);
-    if (!hits.length) {
-      if (mode !== 'checkout') return flash('err', `${code}: not in master stock`);
-      return setNewDev({ Serial: code, Make: '', Model: '', imei: '' });
-    }
+    if (!hits.length) return flash('err', `${code}: HHD not found in Master Inventory. Register the device before handover.`);
     const s = hits[0].Serial;
     if (queue.includes(s)) return flash('err', `${s}: already in queue`);
     setQueue((q) => [...q, s]);
-  };
-
-  const saveNewDev = () => {
-    const s = newDev.Serial;
-    setNewDevs((m) => ({ ...m, [s]: { Make: newDev.Make.trim(), Model: newDev.Model.trim(), imei: newDev.imei.trim() } }));
-    setQueue((q) => (q.includes(s) ? q : [...q, s]));
-    setNewDev(null);
   };
 
   // red tag is always damaged; check-in is damaged only if the inspector says so
@@ -1193,7 +1198,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
   const swapFrom = queue.length ? byC[queue[0]]?.HolderUser || '' : '';
   const ready = !busy && queue.length > 0 && !queue.some(faultMissing)
     && (mode === 'redtag' || shiftId !== '')
-    && (mode !== 'checkout' || queue.every((s) => assign[s]))
+    && (mode !== 'checkout' || !!selectedGc)
     && (mode !== 'swap' || toUser !== '')
     && !(mode === 'checkout' && queue.some((s) => insp[s]?.result === 'damaged'));
 
@@ -1206,18 +1211,16 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
     }));
     let j = null, msg = '';
     if (mode === 'checkout') {
-      const fresh = Object.fromEntries(queue.filter((s) => newDevs[s]).map((s) => [s, newDevs[s]]));
-      j = await push('shiftIssue', { site, shiftId, assignments: Object.fromEntries(queue.map((s) => [s, assign[s]])), inspections, newDevices: fresh });
-      msg = `Issued ${queue.length} device(s) to ${new Set(queue.map((s) => assign[s])).size} worker(s)`;
+      j = await push('shiftIssue', { site, shiftId, gcId: selectedGc.EmployeeID, serials: queue, inspections });
+      msg = `Issued ${queue.length} device(s) to ${selectedGc.Name} (${selectedGc.EmployeeID})`;
     }
     if (mode === 'checkin') { j = await push('shiftReturn', { site, shiftId, serials: queue, inspections }); msg = `Checked in ${queue.length} device(s)`; }
     if (mode === 'swap') { j = await push('shiftSwap', { site, shiftId, toUser, serials: queue }); msg = `Swapped ${queue.length} device(s)`; }
     if (mode === 'redtag') { j = await push('flagRedTag', { site, serials: queue, inspections }); msg = `Red-tagged ${queue.length} device(s)`; }
-    if (j) { flash('ok', msg); setQueue([]); setInsp({}); setAssign({}); setNewDevs({}); }
+    if (j) { flash('ok', msg); setQueue([]); setInsp({}); if (mode === 'checkout') setSelectedGc(null); }
   };
 
   const setI = (s, patch) => setInsp((x) => ({ ...x, [s]: { ...(x[s] || {}), ...patch } }));
-  const applyAll = (u) => setAssign(Object.fromEntries(queue.map((s) => [s, u])));
 
   const rows = custody.filter((c) => c.Site === site).map((c) => ({ ...c, Live: live(c) }));
   const hRows = useMemo(() => {
@@ -1256,8 +1259,8 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
                     <td className="p-3"><div className="font-mono">{l.Serial}</div><div className="text-xs text-slate-500 font-mono">{l.imei}</div></td>
                     <td className="p-3">{HO_EVENT[l.Event] || l.Event}</td>
                     <td className="p-3">{l.Location || '—'}</td>
-                    <td className="p-3">{who(l.FromUser)}</td>
-                    <td className="p-3 font-semibold">{who(l.ToUser)}</td>
+                    <td className="p-3">{l.FromName || who(l.FromUser)}</td>
+                    <td className="p-3 font-semibold">{l.ToName || who(l.ToUser)}</td>
                     <td className="p-3 text-slate-500">{who(l.ByUser)}</td>
                   </tr>
                 ))}
@@ -1306,45 +1309,56 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
                 {SHIFT_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </Select>
             )}
-            {mode === 'checkout' && queue.length > 0 && (
-              <Select value="" onChange={(e) => e.target.value && applyAll(e.target.value)} aria-label="Issue all to">
-                <option value="">Issue all queued to…</option>
-                {people.map((u) => <option key={u.user} value={u.user}>{u.name} ({u.user})</option>)}
-              </Select>
-            )}
+
             {mode === 'swap' && (
               <Select value={toUser} onChange={(e) => setToUser(e.target.value)} aria-label="Receiving worker">
                 <option value="">Receiving worker…</option>
                 {people.filter((u) => u.user !== swapFrom).map((u) => <option key={u.user} value={u.user}>{u.name} ({u.user})</option>)}
               </Select>
             )}
+            {mode === 'checkout' && (
+              <div className="md:col-span-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3 space-y-2">
+                <div className="text-sm font-semibold text-indigo-900">Step 1 · Scan Ground Coordinator ID</div>
+                <div className="flex gap-2">
+                  <Input autoFocus placeholder="Scan Employee ID or Valinor ID, press Enter" value={gcScan} onChange={(e) => setGcScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && scanGC()} />
+                  <Btn onClick={scanGC} disabled={!gcScan.trim() || busy}>Verify GC</Btn>
+                </div>
+                {selectedGc && (
+                  <div className="rounded-md bg-white border border-indigo-200 p-2 text-sm">
+                    <div className="font-semibold text-slate-900">{selectedGc.Name}</div>
+                    <div className="text-slate-600">Employee ID: {selectedGc.EmployeeID} · Valinor: {selectedGc.Valinor}</div>
+                    <div className="text-slate-600">Site: {selectedGc.BranchCode} · {selectedGc.Designation}</div>
+                    <button className="text-xs text-indigo-700 underline mt-1" onClick={() => { setSelectedGc(null); setQueue([]); setInsp({}); }}>Change GC</button>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="flex gap-2 md:col-span-3">
-              <Input autoFocus placeholder="Scan serial or IMEI, press Enter" value={scan} onChange={(e) => setScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
-              <Btn onClick={add} disabled={!scan.trim()}>Add</Btn>
+              <Input autoFocus={mode !== 'checkout' || !!selectedGc} disabled={mode === 'checkout' && !selectedGc} placeholder={mode === 'checkout' ? 'Step 2 · Scan HHD IMEI / serial, press Enter' : 'Scan HHD IMEI / serial, press Enter'} value={scan} onChange={(e) => setScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+              <Btn onClick={add} disabled={!scan.trim() || (mode === 'checkout' && !selectedGc)}>Add</Btn>
             </div>
           </Card>
 
           <Card className="p-4 space-y-3">
             <div className="flex justify-between items-center">
               <h2 className="font-semibold">Queue ({queue.length})</h2>
-              {queue.length > 0 && <button className="text-xs text-red-600" onClick={() => { setQueue([]); setInsp({}); setAssign({}); setNewDevs({}); }}>Clear all</button>}
+              {queue.length > 0 && <button className="text-xs text-red-600" onClick={() => { setQueue([]); setInsp({}); setSelectedGc(null); }}>Clear all</button>}
             </div>
             {queue.length > 0 && mode === 'swap' && <div className="text-sm text-slate-600">Holder: <b>{swapFrom || '—'}</b>. Supervisor approval is recorded with this swap.</div>}
             <div className="divide-y">
               {queue.map((s) => {
-                const isNew = !byS[s];
-                const d = byS[s] || { Make: newDevs[s]?.Make, Model: newDevs[s]?.Model, imei_number: newDevs[s]?.imei };
+                const d = byS[s];
                 const c = byC[s];
                 return (
                   <div key={s} className="py-3 grid md:grid-cols-2 gap-3 items-start">
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between gap-2">
-                        <span className="font-mono font-semibold">{s}{isNew && <span className="ml-2 text-xs bg-blue-100 text-blue-800 rounded px-1.5">new</span>}</span>
+                        <span className="font-mono font-semibold">{s}</span>
                         <button onClick={() => setQueue((q) => q.filter((x) => x !== s))} aria-label={`Remove ${s}`} className="text-red-500 text-xs">Remove</button>
                       </div>
                       <div className="text-slate-600">IMEI/S.No: <span className="font-mono">{d.imei_number || '—'}</span> · {d.Make} {d.Model}</div>
                       {c && HO_HELD.includes(c.Status) && <div className="text-amber-700 text-xs">Currently held by {c.HolderName}{mode === 'checkout' ? ': use swap' : ''}</div>}
-                      {!isNew && d.Location && d.Location !== site && <div className="text-blue-700 text-xs">Will move from {d.Location} to {site}</div>}
+                      {d.Location && d.Location !== site && <div className="text-blue-700 text-xs">Will move from {d.Location} to {site}</div>}
                       {(mode === 'checkin' || mode === 'checkout') && (
                         <Select value={insp[s]?.result || 'ok'} onChange={(e) => setI(s, { result: e.target.value })} aria-label={`Inspection of ${s}`}>
                           <option value="ok">OK</option>
@@ -1357,11 +1371,10 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
                       )}
                     </div>
                     <div className="text-sm">
-                      {mode === 'checkout' && (
-                        <Select className="w-full" value={assign[s] || ''} onChange={(e) => setAssign((a) => ({ ...a, [s]: e.target.value }))} aria-label={`Worker for ${s}`}>
-                          <option value="">Issue to…</option>
-                          {people.map((u) => <option key={u.user} value={u.user}>{u.name} ({u.user})</option>)}
-                        </Select>
+                      {mode === 'checkout' && selectedGc && (
+                        <div className="rounded-md bg-indigo-50 text-indigo-900 p-2 text-xs">
+                          Handover to: <b>{selectedGc.Name}</b> · {selectedGc.EmployeeID}
+                        </div>
                       )}
                       {mode === 'swap' && <div className="text-slate-600">From: <b>{c?.HolderName || '—'}</b></div>}
                     </div>
@@ -1377,20 +1390,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
         </>
       )}
 
-      {newDev && (
-        <Modal title="New device: add to master list" onClose={() => setNewDev(null)}>
-          <div className="space-y-2">
-            <Input value={newDev.Serial} readOnly className="font-mono bg-slate-100" aria-label="Serial" />
-            <Input placeholder="Make *" autoFocus value={newDev.Make} onChange={(e) => setNewDev({ ...newDev, Make: e.target.value })} />
-            <Input placeholder="Model *" value={newDev.Model} onChange={(e) => setNewDev({ ...newDev, Model: e.target.value })} />
-            <Input placeholder="IMEI / Device S.No (optional)" value={newDev.imei} onChange={(e) => setNewDev({ ...newDev, imei: e.target.value })} />
-          </div>
-          <div className="mt-4 flex gap-3">
-            <Btn onClick={saveNewDev} disabled={!newDev.Make.trim() || !newDev.Model.trim()}>Add and queue</Btn>
-            <Btn onClick={() => setNewDev(null)} className="!bg-slate-500 hover:!bg-slate-600">Cancel</Btn>
-          </div>
-        </Modal>
-      )}
+
     </div>
   );
 }

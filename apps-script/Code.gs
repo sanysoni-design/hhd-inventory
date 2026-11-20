@@ -1,4 +1,4 @@
-// HHD Inventory backend v3.4 (v3.3 + auditComplete / audits table / LastAudited): Supabase (PostgreSQL). Columns are CapitalCase (Serial, TicketID, ...).
+// HHD Inventory backend v3.6 (GC-scanned HHD handover/takeover on existing shift custody engine). Columns are CapitalCase.
 // Secret key lives in Script Properties (Project Settings > Script properties > SUPABASE_KEY), never in code.
 // v3.2: Parallel batch requests for 10x speedup on dispatch/ack operations
 
@@ -443,6 +443,125 @@ const inListS_ = ss => '?Serial=in.' + encodeURIComponent('(' + ss.map(s => '"' 
 const getIn_ = (table, ss) => { const out = []; for (let i = 0; i < ss.length; i += 15) out.push(...api_(table, 'GET', null, inListS_(ss.slice(i, i + 15)))); return out; };
 const uniqS_ = a => [...new Set((a || []).map(s => String(s).trim().toUpperCase()).filter(Boolean))];
 const userRow_ = un => { const r = api_('users', 'GET', null, `?Username=eq.${encodeURIComponent(String(un || '').toLowerCase())}`)[0]; return r ? usr_(r) : null; };
+// Dynamic GC master sync: Google Sheet remains the source of truth; Supabase is the fast lookup copy.
+// Spreadsheet ID is the ID from the supplied Google Sheet URL. The Apps Script owner must have access.
+const GC_SHEET_ID_DEFAULT_ = '1R5V1k2xNJ-asP9eQxrJhfJ0iSMLeEUDcpdkGuMVad9k';
+const GC_SYNC_INTERVAL_MIN_ = 15;
+function gcSheetSync_() {
+  const props = PropertiesService.getScriptProperties();
+  const sheetId = props.getProperty('GC_SHEET_ID') || GC_SHEET_ID_DEFAULT_;
+  const tabName = props.getProperty('GC_SHEET_TAB') || 'Sheet1';
+  const ss = SpreadsheetApp.openById(sheetId);
+  const sh = ss.getSheetByName(tabName);
+  need_(sh, 'GC source tab not found: ' + tabName);
+  const values = sh.getDataRange().getDisplayValues();
+  need_(values.length > 1, 'GC source sheet has no data rows');
+  const norm = v => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const headers = values[0].map(norm);
+  const findCol = (...names) => {
+    const i = headers.findIndex(h => names.includes(h));
+    need_(i >= 0, 'Missing required GC sheet column: ' + names[0]);
+    return i;
+  };
+  // Source workbook spells this header "Empoyee ID" (missing the second l).
+  const ix = {
+    employee: findCol('employeeid', 'empoyeeid'),
+    valinor: findCol('valinor'),
+    name: findCol('name'),
+    designation: findCol('designation'),
+    branch: findCol('branchcode'),
+    status: findCol('currentstatus'),
+  };
+  const seenEmp = new Set(), seenVal = new Set(), rows = [];
+  let skipped = 0;
+  values.slice(1).forEach(r => {
+    const designation = String(r[ix.designation] || '').trim();
+    if (!designation.toUpperCase().includes('GROUND COORDINATOR')) return;
+    const employee = String(r[ix.employee] || '').trim();
+    const valinor = String(r[ix.valinor] || '').trim().toUpperCase();
+    if (!employee || !valinor || seenEmp.has(employee) || seenVal.has(valinor)) { skipped++; return; }
+    seenEmp.add(employee); seenVal.add(valinor);
+    rows.push({
+      EmployeeID: employee,
+      Valinor: valinor,
+      Name: String(r[ix.name] || '').trim(),
+      Designation: designation,
+      BranchCode: String(r[ix.branch] || '').trim().toUpperCase(),
+      CurrentStatus: String(r[ix.status] || '').trim().toUpperCase(),
+      SyncedAt: null,
+    });
+  });
+  need_(rows.length > 0, 'No Ground Coordinator records found in the source sheet');
+  const syncedAt = new Date().toISOString();
+  rows.forEach(r => r.SyncedAt = syncedAt);
+  const endpoint = SUPABASE_URL + '/rest/v1/gc_master?on_conflict=EmployeeID';
+  const headersOut = {
+    apikey: SUPABASE_KEY,
+    Authorization: 'Bearer ' + SUPABASE_KEY,
+    'Content-Type': 'application/json',
+    Prefer: 'resolution=merge-duplicates,return=minimal',
+  };
+  // Chunk requests to stay within Apps Script and PostgREST payload limits.
+  for (let i = 0; i < rows.length; i += 300) {
+    const response = UrlFetchApp.fetch(endpoint, {
+      method: 'POST', muteHttpExceptions: true, headers: headersOut,
+      payload: JSON.stringify(rows.slice(i, i + 300)),
+    });
+    need_(response.getResponseCode() >= 200 && response.getResponseCode() < 300,
+      'GC upsert failed at row ' + (i + 1) + ': ' + response.getContentText().slice(0, 500));
+  }
+  // Only after every upsert succeeds, deactivate rows removed from the source sheet.
+  const staleUrl = SUPABASE_URL + '/rest/v1/gc_master?SyncedAt=lt.' + encodeURIComponent(syncedAt);
+  const stale = UrlFetchApp.fetch(staleUrl, {
+    method: 'PATCH', muteHttpExceptions: true, headers: Object.assign({}, headersOut, { Prefer: 'return=minimal' }),
+    payload: JSON.stringify({ CurrentStatus: 'NOT_IN_SOURCE', SyncedAt: syncedAt }),
+  });
+  need_(stale.getResponseCode() >= 200 && stale.getResponseCode() < 300,
+    'GC stale-record update failed: ' + stale.getContentText().slice(0, 500));
+  props.setProperty('GC_LAST_SYNC_AT', syncedAt);
+  props.setProperty('GC_LAST_SYNC_COUNT', String(rows.length));
+  props.setProperty('GC_LAST_SYNC_SKIPPED', String(skipped));
+  return { synced: rows.length, skipped, syncedAt, spreadsheet: ss.getName(), tab: tabName };
+}
+
+// Run manually after setup and whenever an immediate refresh is required.
+function syncGcMasterNow() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const result = gcSheetSync_();
+    Logger.log(JSON.stringify(result));
+    return result;
+  } finally { lock.releaseLock(); }
+}
+
+// Run once to install a recurring 15-minute sync trigger.
+function setupGcSyncTrigger() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'syncGcMasterNow')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('syncGcMasterNow').timeBased().everyMinutes(GC_SYNC_INTERVAL_MIN_).create();
+  Logger.log('GC master sync trigger installed: every ' + GC_SYNC_INTERVAL_MIN_ + ' minutes');
+}
+
+// If the scheduled trigger has not run for 20 minutes, refresh before validating a scanned GC.
+function ensureGcMasterFresh_() {
+  const last = PropertiesService.getScriptProperties().getProperty('GC_LAST_SYNC_AT');
+  if (!last || Date.now() - new Date(last).getTime() > 20 * 60 * 1000) gcSheetSync_();
+}
+
+// GC master is synchronised from the approved employee sheet. Accept either EmployeeID or Valinor barcode.
+const gcRow_ = id => {
+  const key = String(id || '').trim();
+  if (!key) return null;
+  const byEmployee = api_('gc_master', 'GET', null, `?EmployeeID=eq.${encodeURIComponent(key)}&limit=1`)[0];
+  const r = byEmployee || api_('gc_master', 'GET', null, `?Valinor=eq.${encodeURIComponent(key.toUpperCase())}&limit=1`)[0];
+  return r || null;
+};
+const gcOkForSite_ = (g, site) =>
+  !!g && String(g.CurrentStatus || '').trim().toUpperCase() === 'LIVE' &&
+  String(g.Designation || '').toUpperCase().includes('GROUND COORDINATOR') &&
+  String(g.BranchCode || '').trim().toUpperCase() === String(site || '').trim().toUpperCase();
+
 // Fixed, location-independent shifts: code -> [label, end time (IST, 24h)].
 const SHIFTS_ = { A: ['Shift A', '15:00'], B: ['Shift B', '23:00'], C: ['Shift C', '07:00'], G: ['General', '19:00'] };
 // Next occurrence of the shift end after now (IST). Issue happens at shift start, so this is the current shift's end.
@@ -486,43 +605,47 @@ function upsertCustody_(rows) {
 }
 
 const SHIFT_ACTIONS_ = {
-  // Shift start: issue many devices in one save. assignments: {serial: workerUser}. Each device needs a passing pre-issue inspection.
+  // Validate a scanned GC card against the imported GC master and the logged-in IT user's site.
+  lookupGC(p, u) {
+    const site = String(p.site || '').trim();
+    need_(site && siteOk_(u, site), 'Forbidden: no access to ' + site);
+    ensureGcMasterFresh_();
+    const g = gcRow_(p.gcId);
+    need_(g, 'GC ID not found in GC master');
+    need_(gcOkForSite_(g, site), 'GC is inactive, not a Ground Coordinator, or mapped to a different site');
+    return { gc: { EmployeeID: String(g.EmployeeID), Valinor: String(g.Valinor || ''), Name: g.Name, Designation: g.Designation, BranchCode: g.BranchCode, CurrentStatus: g.CurrentStatus } };
+  },
+
+  // Shift start: issue registered devices to one scanned GC in one save. Each device needs a passing pre-issue inspection.
   shiftIssue(p, u) {
     const site = String(p.site || '').trim();
     need_(siteOk_(u, site), 'Forbidden: no access to ' + site);
+    ensureGcMasterFresh_();
     const sh = shiftRow_(p.shiftId);
-    const who = {};
-    Object.entries(p.assignments || {}).forEach(([k, v]) => { who[String(k).trim().toUpperCase()] = String(v || '').trim().toLowerCase(); });
-    const serials = uniqS_(Object.keys(who));
+    const gc = gcRow_(p.gcId);
+    need_(gcOkForSite_(gc, site), 'Scan a LIVE Ground Coordinator mapped to this site before issuing devices');
+    const serials = uniqS_(p.serials);
     need_(serials.length, 'No devices selected');
-    serials.forEach(s => need_(who[s], s + ': pick a worker'));
-    const holders = {};
-    [...new Set(serials.map(s => who[s]))].forEach(un => {
-      const h = userRow_(un);
-      need_(h && siteOk_(h, site), 'Worker has no access to ' + site + ': ' + un);
-      holders[un] = h;
-    });
+    const who = Object.fromEntries(serials.map(s => [s, String(gc.EmployeeID)]));
+    const holders = { [String(gc.EmployeeID)]: { user: String(gc.EmployeeID), name: gc.Name } };
     const devs = getIn_('devices', serials);
     const cust = getIn_('device_custody', serials);
     const insp = p.inspections || {};
     serials.forEach(s => {
       const d = devs.find(x => x.Serial === s), c = cust.find(x => x.Serial === s);
-      if (!d) need_((p.newDevices || {})[s] && (p.newDevices || {})[s].Make && (p.newDevices || {})[s].Model, s + ': not in master list, enter make and model');
-      else need_(d.Status === 'Working', s + ': is ' + d.Status + ', cannot issue');
+      need_(d, s + ': not in Master Inventory; register the HHD before handover');
+      need_(d.Status === 'Working', s + ': is ' + d.Status + ', cannot issue');
+      need_(String(d.Location || '').trim().toUpperCase() === site.toUpperCase(), s + ': device is not recorded at this IT site');
       if (c && HELD_.includes(c.Status)) throw new Error(s + ': still held by ' + c.HolderName + ' (use swap)');
       need_(insp[s] && insp[s].result === 'ok', s + ': pre-issue inspection must pass (red-tag damaged devices)');
     });
     const now = now_(), sess = {};
-    // brand-new devices enter the master list at this site; devices from elsewhere move here
-    const fresh = serials.filter(s => !devs.find(x => x.Serial === s));
-    if (fresh.length) api_('devices', 'POST', fresh.map(s => { const n = p.newDevices[s]; return { Serial: s, imei_number: String(n.imei || '').trim() || null, Make: n.Make, Model: n.Model, Status: 'Working', Location: site, LastUpdated: now }; }));
-    const moved = devs.filter(d => d.Location !== site);
-    if (moved.length) apiBatch_(patchDev_(moved.map(d => d.Serial), { Location: site, LastUpdated: now }));
+    // HOTO only issues devices already registered at this IT site; inventory registration is a separate controlled process.
     Object.keys(holders).forEach(un => { sess[un] = newSid_(); });
     insert_('handover_sessions', Object.keys(holders).map(un => ({ Id: sess[un], Site: site, ShiftId: sh.Id, Type: 'checkout', WorkerUser: holders[un].user, WorkerName: holders[un].name, SupervisorUser: u.user, Status: 'closed', OpenedAt: now, ClosedAt: now })));
     insert_('device_inspections', serials.map(s => ({ Serial: s, SessionId: sess[who[s]], Phase: 'pre_issue', Result: 'ok', Notes: insp[s].notes || '', InspectedBy: u.user, InspectedAt: now })));
     upsertCustody_(serials.map(s => { const h = holders[who[s]]; return { Serial: s, Site: site, HolderUser: h.user, HolderName: h.name, ShiftId: sh.Id, IssuedAt: now, DueAt: sh.EndsAt, ReturnedAt: null, Status: 'issued' }; }));
-    insert_('device_logs', serials.map(s => ({ Serial: s, SessionId: sess[who[s]], Event: 'issued', FromUser: null, ToUser: who[s], Location: site, ShiftId: sh.Id, At: now, ByUser: u.user })));
+    insert_('device_logs', serials.map(s => ({ Serial: s, SessionId: sess[who[s]], Event: 'issued', FromUser: 'IT', FromName: 'IT Department', ToUser: who[s], ToName: gc.Name, Location: site, ShiftId: sh.Id, At: now, ByUser: u.user })));
     return { count: serials.length, workers: Object.keys(holders).length };
   },
 
@@ -538,6 +661,8 @@ const SHIFT_ACTIONS_ = {
     serials.forEach(s => {
       const c = cust.find(x => x.Serial === s);
       if (!c || !HELD_.includes(c.Status)) throw new Error(s + ': not issued to anyone');
+      need_(String(c.Site || '').trim().toUpperCase() === site.toUpperCase(), s + ': device is assigned to a different site');
+      need_(devs.find(x => x.Serial === s), s + ': device not found in master inventory');
       need_(insp[s] && insp[s].result, s + ': post-return inspection required');
       need_(insp[s].result !== 'damaged' || String(insp[s].fault || '').trim(), s + ': fault reason required for damaged devices');
     });
@@ -547,12 +672,12 @@ const SHIFT_ACTIONS_ = {
     insert_('device_inspections', serials.map(s => ({ Serial: s, SessionId: sid, Phase: 'post_return', Result: insp[s].result, Notes: [insp[s].fault, insp[s].notes].filter(Boolean).join(' - '), InspectedBy: u.user, InspectedAt: now })));
     upsertCustody_(serials.map(s => {
       const c = cust.find(x => x.Serial === s);
-      return { Serial: s, Site: site, HolderUser: c.HolderUser, HolderName: c.HolderName, ReturnedAt: now, Status: insp[s].result === 'damaged' ? 'maintenance' : 'returned' };
+      return { Serial: s, Site: site, HolderUser: 'IT', HolderName: 'IT Department', ReturnedAt: now, Status: insp[s].result === 'damaged' ? 'maintenance' : 'returned' };
     }));
     insert_('device_logs', serials.map(s => {
       const c = cust.find(x => x.Serial === s);
       const ev = insp[s].result === 'damaged' ? 'returned_damaged' : ['overdue', 'missing'].includes(c.Status) ? 'returned_late' : 'returned';
-      return { Serial: s, SessionId: sid, Event: ev, FromUser: c.HolderUser, ToUser: null, Location: site, ShiftId: c.ShiftId, At: now, ByUser: u.user };
+      return { Serial: s, SessionId: sid, Event: ev, FromUser: c.HolderUser, FromName: c.HolderName, ToUser: 'IT', ToName: 'IT Department', Location: site, ShiftId: c.ShiftId, At: now, ByUser: u.user };
     }));
     if (damaged.length) {
       insert_('status_log', damaged.map(s => ({ Serial: s, Location: site, OldStatus: devs.find(x => x.Serial === s).Status, NewStatus: 'Not-Working', ChangedAt: now, ChangedBy: u.name + ' (' + u.user + ')' })));
@@ -686,7 +811,7 @@ function doGet(e) {
     const u = verify_(e.parameter.token);
     if (!u) return out_({ ok: false, error: 'auth' });
     return out_({
-      ok: true, version: '3.5', devices: api_('devices'), tickets: api_('tickets'),
+      ok: true, version: '3.6', devices: api_('devices'), tickets: api_('tickets'),
       users: users_(), sites: api_('sites').map(x => x.Site),
       // admins see every change, others only changes at sites they can access
       audits: api_('audits', 'GET', null, '?select=AuditID,Location,Auditor,CompletedAt,Summary,Items&order=CompletedAt.desc&limit=500'),
