@@ -1173,14 +1173,15 @@ const healthDamaged = (v) => String(v || '').startsWith('damaged');
 
 const HO_MODES = [
   ['checkout', 'Checkout (shift start)', Repeat],
-  ['checkin', 'Check-in (shift end)', Undo2],
+  ['checkin', 'GC → Operations receipt', Undo2],
+  ['opsit', 'Operations → IT receipt', ArrowRightLeft],
   ['swap', 'Mid-shift swap', ArrowRightLeft],
   ['redtag', 'Red tag', Flag],
   ['recon', 'Reconciliation', ListChecks],
   ['history', 'Device history', History],
 ];
-const HO_HELD = ['issued', 'overdue', 'missing'];
-const HO_EVENT = { issued: 'Issued', returned: 'Returned', returned_late: 'Returned late', returned_damaged: 'Returned damaged', swap_out: 'Swap out', swap_in: 'Swap in', flagged: 'Red-tagged' };
+const HO_HELD = ['issued', 'overdue', 'missing', 'ops_received'];
+const HO_EVENT = { issued: 'Issued', gc_to_ops_received: 'GC → Operations received', ops_to_it_received: 'Operations → IT received', returned: 'Returned', returned_late: 'Returned late', returned_damaged: 'Returned damaged', swap_out: 'Swap out', swap_in: 'Swap in', flagged: 'Red-tagged' };
 // fixed, location-independent shifts; end times are set by the server
 const SHIFT_OPTS = [['A', 'Shift A (ends 15:00)'], ['B', 'Shift B (ends 23:00)'], ['C', 'Shift C (ends 07:00)'], ['G', 'General (ends 19:00)']];
 
@@ -1248,7 +1249,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
   };
 
   // red tag is always damaged; check-in is damaged only if the inspector says so
-  const isDamaged = (s) => mode === 'redtag' || insp[s]?.result === 'damaged';
+  const isDamaged = (s) => mode === 'redtag' || insp[s]?.result === 'damaged' || healthFunctional(insp[s]?.healthCondition || '') === 'Not-Working';
   const faultMissing = (s) => isDamaged(s) && !(insp[s]?.fault && (insp[s].fault !== OTHER || insp[s]?.note?.trim()));
   const swapFrom = queue.length ? byC[queue[0]]?.HolderUser || '' : '';
   const ready = !busy && queue.length > 0 && !queue.some(faultMissing)
@@ -1269,7 +1270,8 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
       j = await push('shiftIssue', { site, shiftId, gcId: selectedGc.EmployeeID, serials: queue, inspections });
       msg = `Issued ${queue.length} device(s) to ${selectedGc.Name} (${selectedGc.EmployeeID})`;
     }
-    if (mode === 'checkin') { j = await push('shiftReturn', { site, shiftId, serials: queue, inspections }); msg = `Checked in ${queue.length} device(s)`; }
+    if (mode === 'checkin') { j = await push('shiftReturn', { site, shiftId, serials: queue, inspections }); msg = `Received ${queue.length} device(s) into Operations custody`; }
+    if (mode === 'opsit') { j = await push('opsTransferToIT', { site, shiftId, serials: queue, inspections }); msg = `IT acknowledged receipt of ${queue.length} device(s)`; }
     if (mode === 'swap') { j = await push('shiftSwap', { site, shiftId, recipient, inspections, serials: queue }); msg = `Transferred ${queue.length} device(s) to ${recipient?.name || 'recipient'}`; }
     if (mode === 'redtag') { j = await push('flagRedTag', { site, serials: queue, inspections }); msg = `Red-tagged ${queue.length} device(s)`; }
     if (j) { flash('ok', msg); setQueue([]); setInsp({}); if (mode === 'checkout') setSelectedGc(null); }
@@ -1419,12 +1421,14 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
                       <div className="text-slate-600">IMEI/S.No: <span className="font-mono">{d.imei_number || '—'}</span> · {d.Make} {d.Model}</div>
                       {c && HO_HELD.includes(c.Status) && <div className="text-amber-700 text-xs">Currently held by {c.HolderName}{mode === 'checkout' ? ': use swap' : ''}</div>}
                       {d.Location && d.Location !== site && <div className="text-blue-700 text-xs">Will move from {d.Location} to {site}</div>}
-                      {(mode === 'checkout' || mode === 'checkin' || mode === 'swap' || mode === 'redtag') && (
+                      {(mode === 'checkout' || mode === 'checkin' || mode === 'opsit' || mode === 'swap' || mode === 'redtag') && (
                         <Select value={insp[s]?.healthCondition || (mode === 'redtag' ? 'damaged_working' : 'good_working')} onChange={(e) => setI(s, { healthCondition: e.target.value, result: healthDamaged(e.target.value) ? 'damaged' : 'ok' })} aria-label={`Device condition of ${s}`}>
                           {HEALTH_OPTIONS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
                         </Select>
                       )}
-                      {mode === 'checkout' && <div className="text-xs text-slate-500">Damaged devices cannot be issued: use Red tag.</div>}
+                      {mode === 'checkout' && <div className="text-xs text-slate-500">Damaged or non-working devices cannot be issued.</div>}
+                      {mode === 'checkin' && <div className="text-xs text-slate-500">Operations physically receives the HHD from the GC. This does not transfer custody to IT.</div>}
+                      {mode === 'opsit' && <div className="text-xs text-slate-500">Use only after Operations has received the HHD. IT receipt moves damaged/non-working devices into maintenance quarantine.</div>}
                       {isDamaged(s) && mode !== 'swap' && (
                         <FaultPick fault={insp[s]?.fault || ''} note={insp[s]?.note || ''} onFault={(v) => setI(s, { fault: v })} onNote={(v) => setI(s, { note: v })} />
                       )}
@@ -1443,7 +1447,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
               {!queue.length && <div className="py-8 text-center text-slate-400">Nothing scanned yet.</div>}
             </div>
             <Btn disabled={!ready} onClick={submit} className="w-full">
-              {mode === 'checkout' ? `Issue ${queue.length} device(s)` : mode === 'checkin' ? 'Check in devices' : mode === 'swap' ? 'Record swap' : 'Submit red tag'}
+              {mode === 'checkout' ? `Issue ${queue.length} device(s)` : mode === 'checkin' ? 'Receive into Operations custody' : mode === 'opsit' ? 'Confirm IT receipt' : mode === 'swap' ? 'Record swap' : 'Submit red tag'}
             </Btn>
           </Card>
         </>
