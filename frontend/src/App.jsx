@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   LayoutDashboard, Inbox, ScanLine, Boxes, ClipboardList, Settings, RefreshCw, ShieldCheck,
-  X, Search, Truck, CheckCircle2, AlertTriangle, User, MapPin, Trash2, Send, LogOut, Lock, Upload,
+  X, Search, Truck, CheckCircle2, AlertTriangle, User, MapPin, Trash2, Send, LogOut, Lock, Upload, Camera,
   ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, History, ClipboardCheck, FileDown, ScrollText, Repeat, Undo2, ArrowRightLeft, Flag, ListChecks,
 } from 'lucide-react';
 
@@ -973,6 +973,7 @@ function AddDevice({ devices, push, busy, flash }) {
   const [fault, setFault] = useState('');
   const [note, setNote] = useState('');
   const [look, setLook] = useState('');
+  const [cameraTarget, setCameraTarget] = useState('');
   const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
   const badFault = d.Status === 'Not-Working' && !(fault && (fault !== OTHER || note.trim()));
   // scan or type a serial/IMEI already in the master list: fills the form from it
@@ -1000,10 +1001,10 @@ function AddDevice({ devices, push, busy, flash }) {
         <div className="flex gap-2">
           <Input placeholder="Scan serial or IMEI to load from master list" value={look} onChange={(e) => setLook(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); load(); } }} />
-          <Btn type="button" onClick={load} disabled={!look.trim()}>Load</Btn>
+          <Btn type="button" onClick={load} disabled={!look.trim()}>Load</Btn><Btn type="button" className="!bg-slate-700" onClick={() => setCameraTarget('lookup')}><Camera size={16}/> Scan</Btn>
         </div>
-        <Input placeholder="Serial (e.g. HHD-7001)" value={d.Serial} onChange={set('Serial')} />
-        <Input placeholder="IMEI (optional; may repeat across devices)" value={d.imei_number} onChange={set('imei_number')} />
+        <div className="flex gap-2"><Input placeholder="Serial (e.g. HHD-7001)" value={d.Serial} onChange={set('Serial')} /><Btn type="button" className="!bg-slate-700" onClick={() => setCameraTarget('serial')}><Camera size={16}/></Btn></div>
+        <div className="flex gap-2"><Input placeholder="IMEI (optional; may repeat across devices)" value={d.imei_number} onChange={set('imei_number')} /><Btn type="button" className="!bg-slate-700" onClick={() => setCameraTarget('imei')}><Camera size={16}/></Btn></div>
         <Input placeholder="Make (type a new one to add it)" list="dl-makes" value={d.Make} onChange={set('Make')} />
         <Input placeholder="Model (type a new one to add it)" list="dl-models" value={d.Model} onChange={set('Model')} />
         <Select className="w-full" value={d.Status} onChange={set('Status')}>{EDITABLE.map((s) => <option key={s}>{s}</option>)}</Select>
@@ -1011,6 +1012,7 @@ function AddDevice({ devices, push, busy, flash }) {
         <Input placeholder="Location (site)" list="dl-sites" value={d.Location} onChange={set('Location')} />
         <Btn type="submit" disabled={busy || badFault || !d.Serial || !d.Make || !d.Model || !d.Location}>Save device</Btn>
       </form>
+      {cameraTarget && <CameraScanner onClose={() => setCameraTarget('')} onDetected={(value) => { if (cameraTarget === 'lookup') setLook(value); if (cameraTarget === 'serial') setD(x => ({ ...x, Serial: value })); if (cameraTarget === 'imei') setD(x => ({ ...x, imei_number: value })); setCameraTarget(''); }} />}
     </Card>
   );
 }
@@ -1125,6 +1127,50 @@ function UserAdmin({ users, push, busy, flash }) {
   );
 }
 
+// Camera scanner: native BarcodeDetector on supported browsers; keyboard scanners remain available as fallback.
+function CameraScanner({ onDetected, onClose }) {
+  const videoRef = useRef(null);
+  const [error, setError] = useState('');
+  const detectedRef = useRef(onDetected);
+  useEffect(() => { detectedRef.current = onDetected; }, [onDetected]);
+  useEffect(() => {
+    let stream, timer, stopped = false;
+    const start = async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access requires HTTPS and browser permission. Use a USB/Bluetooth scanner or type the code.');
+        if (!('BarcodeDetector' in window)) throw new Error('This browser does not support native barcode/QR detection. Use Chrome or Edge, or use a USB/Bluetooth scanner.');
+        const wanted = ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix','pdf417'];
+        const supported = await window.BarcodeDetector.getSupportedFormats?.();
+        const formats = supported?.length ? wanted.filter(f => supported.includes(f)) : ['qr_code','code_128','ean_13'];
+        const detector = new window.BarcodeDetector({ formats });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+        const scan = async () => {
+          if (stopped || !videoRef.current) return;
+          try {
+            const hits = await detector.detect(videoRef.current);
+            if (hits.length && hits[0].rawValue) { stopped = true; detectedRef.current?.(hits[0].rawValue.trim()); return; }
+          } catch (_) { /* wait for next camera frame */ }
+          timer = window.setTimeout(scan, 180);
+        };
+        scan();
+      } catch (e) { setError(e.message || 'Unable to start camera.'); }
+    };
+    start();
+    return () => { stopped = true; window.clearTimeout(timer); stream?.getTracks().forEach(t => t.stop()); };
+  }, []);
+  return <Modal title="Scan barcode / QR code" onClose={onClose}><div className="space-y-3"><video ref={videoRef} className="w-full rounded-lg bg-black min-h-56" playsInline muted /><p className="text-sm text-slate-500">Point the rear camera at the barcode or QR code. Keep it inside the frame.</p>{error && <div className="rounded bg-amber-50 text-amber-800 p-3 text-sm">{error}</div>}<Btn className="!bg-slate-500" onClick={onClose}>Close scanner</Btn></div></Modal>;
+}
+
+const HEALTH_OPTIONS = [
+  ['good_working', 'Good condition — Working'],
+  ['good_not_working', 'Good condition — Not working'],
+  ['damaged_working', 'Damaged — Working'],
+  ['damaged_not_working', 'Damaged — Not working'],
+];
+const healthFunctional = (v) => String(v || '').endsWith('not_working') ? 'Not-Working' : 'Working';
+const healthDamaged = (v) => String(v || '').startsWith('damaged');
+
 const HO_MODES = [
   ['checkout', 'Checkout (shift start)', Repeat],
   ['checkin', 'Check-in (shift end)', Undo2],
@@ -1141,7 +1187,9 @@ const SHIFT_OPTS = [['A', 'Shift A (ends 15:00)'], ['B', 'Shift B (ends 23:00)']
 function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash }) {
   const [mode, setMode] = useState('checkout');
   const [shiftId, setShiftId] = useState('');
-  const [toUser, setToUser] = useState('');   // swap: receiving worker
+  const [toUser, setToUser] = useState('');   // swap: scanned recipient identifier
+  const [recipient, setRecipient] = useState(null);
+  const [cameraTarget, setCameraTarget] = useState('');
   const [gcScan, setGcScan] = useState('');
   const [selectedGc, setSelectedGc] = useState(null);
   const [scan, setScan] = useState('');
@@ -1161,7 +1209,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
   const live = (c) => (c.Status === 'issued' && new Date(c.DueAt) < now ? 'overdue' : c.Status);
   const who = (un) => (un ? nameOf[un] || un : '—');
 
-  useEffect(() => { setQueue([]); setInsp({}); setSelectedGc(null); setGcScan(''); }, [mode, site]);
+  useEffect(() => { setQueue([]); setInsp({}); setSelectedGc(null); setGcScan(''); setToUser(''); setRecipient(null); }, [mode, site]);
 
   // GC card can carry either Employee ID or Valinor ID; the backend validates both against the GC master.
   const scanGC = async () => {
@@ -1176,6 +1224,13 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
       setSelectedGc(j.gc);
       flash('ok', `GC verified: ${j.gc.Name} (${j.gc.EmployeeID})`);
     }
+  };
+
+  const scanRecipient = async (raw = toUser) => {
+    const code = String(raw || '').trim().toUpperCase();
+    if (!code) return;
+    const j = await push('lookupHandoverRecipient', { personId: code, site });
+    if (j?.recipient) { setRecipient(j.recipient); setToUser(code); flash('ok', `Recipient verified: ${j.recipient.name} (${j.recipient.id})`); }
   };
 
   // scan a serial or IMEI. Handover requires a valid GC to be scanned first.
@@ -1199,15 +1254,15 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
   const ready = !busy && queue.length > 0 && !queue.some(faultMissing)
     && (mode === 'redtag' || shiftId !== '')
     && (mode !== 'checkout' || !!selectedGc)
-    && (mode !== 'swap' || toUser !== '')
-    && !(mode === 'checkout' && queue.some((s) => insp[s]?.result === 'damaged'));
+    && (mode !== 'swap' || !!recipient)
+    && !(mode === 'checkout' && queue.some((s) => insp[s]?.result === 'damaged' || healthFunctional(insp[s]?.healthCondition || 'good_working') === 'Not-Working'));
 
   // one save for the whole batch; the server issues each device to the worker chosen on its row
   const submit = async () => {
     const inspections = Object.fromEntries(queue.map((s) => {
       const i = insp[s] || {};
       const dmg = isDamaged(s);
-      return [s, { result: dmg ? 'damaged' : 'ok', fault: dmg ? faultText(i.fault || '', i.note || '') : '', notes: i.note || '' }];
+      return [s, { result: dmg ? 'damaged' : 'ok', healthCondition: i.healthCondition || (dmg ? 'damaged_working' : 'good_working'), functionalStatus: healthFunctional(i.healthCondition || (dmg ? 'damaged_working' : 'good_working')), fault: dmg ? faultText(i.fault || '', i.note || '') : '', notes: i.note || '' }];
     }));
     let j = null, msg = '';
     if (mode === 'checkout') {
@@ -1215,7 +1270,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
       msg = `Issued ${queue.length} device(s) to ${selectedGc.Name} (${selectedGc.EmployeeID})`;
     }
     if (mode === 'checkin') { j = await push('shiftReturn', { site, shiftId, serials: queue, inspections }); msg = `Checked in ${queue.length} device(s)`; }
-    if (mode === 'swap') { j = await push('shiftSwap', { site, shiftId, toUser, serials: queue }); msg = `Swapped ${queue.length} device(s)`; }
+    if (mode === 'swap') { j = await push('shiftSwap', { site, shiftId, recipient, inspections, serials: queue }); msg = `Transferred ${queue.length} device(s) to ${recipient?.name || 'recipient'}`; }
     if (mode === 'redtag') { j = await push('flagRedTag', { site, serials: queue, inspections }); msg = `Red-tagged ${queue.length} device(s)`; }
     if (j) { flash('ok', msg); setQueue([]); setInsp({}); if (mode === 'checkout') setSelectedGc(null); }
   };
@@ -1311,17 +1366,22 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
             )}
 
             {mode === 'swap' && (
-              <Select value={toUser} onChange={(e) => setToUser(e.target.value)} aria-label="Receiving worker">
-                <option value="">Receiving worker…</option>
-                {people.filter((u) => u.user !== swapFrom).map((u) => <option key={u.user} value={u.user}>{u.name} ({u.user})</option>)}
-              </Select>
+              <div className="md:col-span-3 space-y-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                <div className="text-sm font-semibold text-indigo-900">Scan receiving person's ID (GC Employee ID / Valinor or authorized user's login ID)</div>
+                <div className="flex gap-2">
+                  <Input placeholder="Scan recipient ID and press Enter" value={toUser} onChange={(e) => { setToUser(e.target.value); setRecipient(null); }} onKeyDown={(e) => e.key === 'Enter' && scanRecipient()} />
+                  <Btn type="button" onClick={() => scanRecipient()} disabled={!toUser.trim() || busy}>Verify ID</Btn>
+                  <Btn type="button" className="!bg-slate-700" onClick={() => setCameraTarget('recipient')}><Camera size={16}/> Scan</Btn>
+                </div>
+                {recipient && <div className="rounded bg-white border p-2 text-sm"><b>To: {recipient.name}</b> · {recipient.id} <span className="text-slate-500">({recipient.type})</span></div>}
+              </div>
             )}
             {mode === 'checkout' && (
               <div className="md:col-span-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3 space-y-2">
                 <div className="text-sm font-semibold text-indigo-900">Step 1 · Scan Ground Coordinator ID</div>
                 <div className="flex gap-2">
                   <Input autoFocus placeholder="Scan Employee ID or Valinor ID, press Enter" value={gcScan} onChange={(e) => setGcScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && scanGC()} />
-                  <Btn onClick={scanGC} disabled={!gcScan.trim() || busy}>Verify GC</Btn>
+                  <Btn onClick={scanGC} disabled={!gcScan.trim() || busy}>Verify GC</Btn><Btn type="button" className="!bg-slate-700" onClick={() => setCameraTarget('gc')}><Camera size={16}/> Scan</Btn>
                 </div>
                 {selectedGc && (
                   <div className="rounded-md bg-white border border-indigo-200 p-2 text-sm">
@@ -1335,7 +1395,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
             )}
             <div className="flex gap-2 md:col-span-3">
               <Input autoFocus={mode !== 'checkout' || !!selectedGc} disabled={mode === 'checkout' && !selectedGc} placeholder={mode === 'checkout' ? 'Step 2 · Scan HHD IMEI / serial, press Enter' : 'Scan HHD IMEI / serial, press Enter'} value={scan} onChange={(e) => setScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
-              <Btn onClick={add} disabled={!scan.trim() || (mode === 'checkout' && !selectedGc)}>Add</Btn>
+              <Btn onClick={add} disabled={!scan.trim() || (mode === 'checkout' && !selectedGc)}>Add</Btn><Btn type="button" className="!bg-slate-700" onClick={() => setCameraTarget('device')}><Camera size={16}/> Scan</Btn>
             </div>
           </Card>
 
@@ -1344,7 +1404,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
               <h2 className="font-semibold">Queue ({queue.length})</h2>
               {queue.length > 0 && <button className="text-xs text-red-600" onClick={() => { setQueue([]); setInsp({}); setSelectedGc(null); }}>Clear all</button>}
             </div>
-            {queue.length > 0 && mode === 'swap' && <div className="text-sm text-slate-600">Holder: <b>{swapFrom || '—'}</b>. Supervisor approval is recorded with this swap.</div>}
+            {queue.length > 0 && mode === 'swap' && <div className="text-sm text-slate-600">From: <b>{byC[queue[0]]?.HolderName || swapFrom || '—'}</b> ({swapFrom || '—'}) · To: <b>{recipient?.name || 'Scan recipient ID'}</b> ({recipient?.id || '—'}) · Performed by: <b>Logged-in authorized operator</b></div>}
             <div className="divide-y">
               {queue.map((s) => {
                 const d = byS[s];
@@ -1359,10 +1419,9 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
                       <div className="text-slate-600">IMEI/S.No: <span className="font-mono">{d.imei_number || '—'}</span> · {d.Make} {d.Model}</div>
                       {c && HO_HELD.includes(c.Status) && <div className="text-amber-700 text-xs">Currently held by {c.HolderName}{mode === 'checkout' ? ': use swap' : ''}</div>}
                       {d.Location && d.Location !== site && <div className="text-blue-700 text-xs">Will move from {d.Location} to {site}</div>}
-                      {(mode === 'checkin' || mode === 'checkout') && (
-                        <Select value={insp[s]?.result || 'ok'} onChange={(e) => setI(s, { result: e.target.value })} aria-label={`Inspection of ${s}`}>
-                          <option value="ok">OK</option>
-                          {mode === 'checkin' && <option value="damaged">Damaged</option>}
+                      {(mode === 'checkout' || mode === 'checkin' || mode === 'swap' || mode === 'redtag') && (
+                        <Select value={insp[s]?.healthCondition || (mode === 'redtag' ? 'damaged_working' : 'good_working')} onChange={(e) => setI(s, { healthCondition: e.target.value, result: healthDamaged(e.target.value) ? 'damaged' : 'ok' })} aria-label={`Device condition of ${s}`}>
+                          {HEALTH_OPTIONS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
                         </Select>
                       )}
                       {mode === 'checkout' && <div className="text-xs text-slate-500">Damaged devices cannot be issued: use Red tag.</div>}
@@ -1391,6 +1450,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
       )}
 
 
+      {cameraTarget && <CameraScanner onClose={() => setCameraTarget('')} onDetected={(value) => { const target = cameraTarget; setCameraTarget(''); if (target === 'gc') { setGcScan(value); setTimeout(() => { const code = value.trim().toUpperCase(); push('lookupGC', { gcId: code, site }).then(j => { if (j?.gc) { setSelectedGc(j.gc); flash('ok', `GC verified: ${j.gc.Name} (${j.gc.EmployeeID})`); } }); }, 0); } else if (target === 'recipient') { setToUser(value); setTimeout(() => scanRecipient(value), 0); } else { setScan(value); setTimeout(() => { const code = value.trim().toUpperCase(); const hits = byS[code] ? [byS[code]] : byImei[code] || []; if (hits.length === 1 && !queue.includes(hits[0].Serial)) setQueue(q => [...q, hits[0].Serial]); else if (!hits.length) flash('err', `${code}: not found in Master Inventory`); }, 0); } }} />}
     </div>
   );
 }
