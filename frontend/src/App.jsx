@@ -1179,9 +1179,10 @@ const HO_MODES = [
   ['redtag', 'Red tag', Flag],
   ['recon', 'Reconciliation', ListChecks],
   ['history', 'Device history', History],
+  ['adminack', 'Admin acknowledgement', ClipboardCheck],
 ];
 const HO_HELD = ['issued', 'overdue', 'missing', 'ops_received'];
-const HO_EVENT = { issued: 'Issued', gc_to_ops_received: 'GC → Operations received', ops_to_it_received: 'Operations → IT received', returned: 'Returned', returned_late: 'Returned late', returned_damaged: 'Returned damaged', swap_out: 'Swap out', swap_in: 'Swap in', flagged: 'Red-tagged' };
+const HO_EVENT = { issued: 'Issued', gc_to_ops_received: 'GC → Operations received', ops_to_it_received: 'Operations → IT received', admin_ack_it_to_admin: 'Admin acknowledged IT handover', admin_ack_admin_to_it: 'Admin acknowledged IT return', returned: 'Returned', returned_late: 'Returned late', returned_damaged: 'Returned damaged', swap_out: 'Swap out', swap_in: 'Swap in', flagged: 'Red-tagged' };
 // fixed, location-independent shifts; end times are set by the server
 const SHIFT_OPTS = [['A', 'Shift A (ends 15:00)'], ['B', 'Shift B (ends 23:00)'], ['C', 'Shift C (ends 07:00)'], ['G', 'General (ends 19:00)']];
 
@@ -1197,6 +1198,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
   const [queue, setQueue] = useState([]);     // serials, in scan order
   const [insp, setInsp] = useState({});       // serial -> {result, fault, note}
   const [hq, setHq] = useState('');
+  const [ackDirection, setAckDirection] = useState('it_to_admin');
   const byS = useMemo(() => Object.fromEntries(devices.map((d) => [d.Serial, d])), [devices]);
   const byC = useMemo(() => Object.fromEntries(custody.map((c) => [c.Serial, c])), [custody]);
   const byImei = useMemo(() => {
@@ -1253,10 +1255,10 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
   const faultMissing = (s) => isDamaged(s) && !(insp[s]?.fault && (insp[s].fault !== OTHER || insp[s]?.note?.trim()));
   const swapFrom = queue.length ? byC[queue[0]]?.HolderUser || '' : '';
   const ready = !busy && queue.length > 0 && !queue.some(faultMissing)
-    && (mode === 'redtag' || shiftId !== '')
+    && (mode === 'redtag' || mode === 'adminack' || shiftId !== '')
     && (mode !== 'checkout' || !!selectedGc)
     && (mode !== 'swap' || !!recipient)
-    && !(mode === 'checkout' && queue.some((s) => insp[s]?.result === 'damaged' || healthFunctional(insp[s]?.healthCondition || 'good_working') === 'Not-Working'));
+    && !(mode === 'checkout' && queue.some((s) => healthFunctional(insp[s]?.healthCondition || 'good_working') === 'Not-Working'));
 
   // one save for the whole batch; the server issues each device to the worker chosen on its row
   const submit = async () => {
@@ -1274,12 +1276,13 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
     if (mode === 'opsit') { j = await push('opsTransferToIT', { site, shiftId, serials: queue, inspections }); msg = `IT acknowledged receipt of ${queue.length} device(s)`; }
     if (mode === 'swap') { j = await push('shiftSwap', { site, shiftId, recipient, inspections, serials: queue }); msg = `Transferred ${queue.length} device(s) to ${recipient?.name || 'recipient'}`; }
     if (mode === 'redtag') { j = await push('flagRedTag', { site, serials: queue, inspections }); msg = `Red-tagged ${queue.length} device(s)`; }
+    if (mode === 'adminack') { j = await push('adminAcknowledge', { site, serials: queue, direction: ackDirection }); msg = `Admin process acknowledgement recorded for ${queue.length} device(s)`; }
     if (j) { flash('ok', msg); setQueue([]); setInsp({}); if (mode === 'checkout') setSelectedGc(null); }
   };
 
   const setI = (s, patch) => setInsp((x) => ({ ...x, [s]: { ...(x[s] || {}), ...patch } }));
 
-  const rows = custody.filter((c) => c.Site === site).map((c) => ({ ...c, Live: live(c) }));
+  const rows = custody.filter((c) => c.Site === site && String(c.HolderUser || '').toLowerCase() !== 'admin' && String(c.HolderName || '').toLowerCase() !== 'administrator').map((c) => ({ ...c, Live: live(c) }));
   const hRows = useMemo(() => {
     const n = hq.trim().toLowerCase();
     return logs
@@ -1297,6 +1300,17 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
           </button>
         ))}
       </div>
+
+      {mode === 'adminack' && (
+        <Card className="p-4 space-y-3">
+          <div className="text-sm text-slate-700">Admin records a process acknowledgement only. Physical custody remains with IT; Admin is never recorded as a device holder.</div>
+          <Select value={ackDirection} onChange={(e) => setAckDirection(e.target.value)} aria-label="Acknowledgement direction">
+            <option value="it_to_admin">IT → Admin process acknowledgement</option>
+            <option value="admin_to_it">Admin → IT process acknowledgement</option>
+          </Select>
+          <div className="text-xs text-slate-500">Scan the HHD serial/IMEI below, then record the acknowledgement.</div>
+        </Card>
+      )}
 
       {mode === 'history' && (
         <div className="space-y-3">
@@ -1330,37 +1344,40 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
 
       {mode === 'recon' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card className="p-3"><div className="text-xs text-slate-500">Issued</div><div className="text-2xl font-bold">{rows.filter((r) => r.Live === 'issued').length}</div></Card>
-            <Card className="p-3"><div className="text-xs text-slate-500">Returned</div><div className="text-2xl font-bold">{rows.filter((r) => r.Live === 'returned').length}</div></Card>
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            <Card className="p-3"><div className="text-xs text-slate-500">Total tracked</div><div className="text-2xl font-bold">{rows.length}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">With GC</div><div className="text-2xl font-bold">{rows.filter((r) => ['issued', 'overdue', 'missing'].includes(r.Live)).length}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">With Operations</div><div className="text-2xl font-bold">{rows.filter((r) => r.Live === 'ops_received').length}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">With IT</div><div className="text-2xl font-bold">{rows.filter((r) => ['returned', 'maintenance'].includes(r.Live) || String(r.HolderUser || '').toUpperCase() === 'IT').length}</div></Card>
             <Card className="p-3"><div className="text-xs text-slate-500">Overdue / Missing</div><div className="text-2xl font-bold text-red-700">{rows.filter((r) => ['overdue', 'missing'].includes(r.Live)).length}</div></Card>
             <Card className="p-3"><div className="text-xs text-slate-500">Under Maintenance</div><div className="text-2xl font-bold text-orange-700">{rows.filter((r) => r.Live === 'maintenance').length}</div></Card>
           </div>
           <Card className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr><th className="p-3">Serial</th><th className="p-3">Location</th><th className="p-3">Holder</th><th className="p-3">Issued</th><th className="p-3">Shift end</th><th className="p-3">Status</th></tr>
+                <tr><th className="p-3">Serial</th><th className="p-3">Location</th><th className="p-3">Holder</th><th className="p-3">Issued</th><th className="p-3">Shift end</th><th className="p-3">Device status</th><th className="p-3">Custody status</th></tr>
               </thead>
               <tbody>
-                {rows.filter((r) => r.Live !== 'returned').map((r) => (
+                {rows.map((r) => (
                   <tr key={r.Serial} className="border-t">
                     <td className="p-3 font-mono">{r.Serial}</td><td className="p-3">{r.Site}</td>
                     <td className="p-3">{r.HolderName} <span className="text-slate-500">({r.HolderUser})</span></td>
                     <td className="p-3 text-slate-500">{fmt(r.IssuedAt)}</td><td className="p-3 text-slate-500">{fmt(r.DueAt)}</td>
+                    <td className="p-3 text-xs">{byS[r.Serial]?.Status || '—'}</td>
                     <td className="p-3 text-xs font-medium">{r.Live}</td>
                   </tr>
                 ))}
-                {!rows.some((r) => r.Live !== 'returned') && <tr><td colSpan={6} className="p-6 text-center text-slate-400">Nothing outstanding</td></tr>}
+                {!rows.length && <tr><td colSpan={7} className="p-6 text-center text-slate-400">No custody records for this site</td></tr>}
               </tbody>
             </table>
           </Card>
         </div>
       )}
 
-      {mode !== 'recon' && mode !== 'history' && (
+      {mode !== 'recon' && mode !== 'history' && ( 
         <>
           <Card className="p-4 grid md:grid-cols-3 gap-3">
-            {mode !== 'redtag' && (
+            {mode !== 'redtag' && mode !== 'adminack' && (
               <Select value={shiftId} onChange={(e) => setShiftId(e.target.value)} aria-label="Shift">
                 <option value="">Select shift…</option>
                 {SHIFT_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
