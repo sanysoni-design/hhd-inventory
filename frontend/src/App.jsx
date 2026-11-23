@@ -70,6 +70,8 @@ const BADGE = {
   'Pending Receipt': 'bg-amber-100 text-amber-800',
   'Cannot_be_repaired': 'bg-orange-100 text-orange-800',
   Acknowledged: 'bg-green-100 text-green-800',
+  LIVE: 'bg-green-100 text-green-800',
+  INACTIVE: 'bg-gray-200 text-gray-700',
 };
 const TABS = [
   ['dash', 'Dashboard Matrix', LayoutDashboard],
@@ -379,7 +381,7 @@ function Dashboard({ devices }) {
 function Main({ url, setUrl, auth, logout }) {
   const [site, setSite] = useState(() => ls('hhd_site'));
   const [tab, setTab] = useState('dash');
-  const [data, setData] = useState({ devices: [], tickets: [], users: [], sites: [], statusLog: [] });
+  const [data, setData] = useState({ devices: [], tickets: [], users: [], teamLeaders: [], sites: [], statusLog: [] });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [exportSites, setExportSites] = useState([]); // master-list CSV: sites to include
@@ -411,7 +413,7 @@ function Main({ url, setUrl, auth, logout }) {
         const hit = new Set(action === 'changeStatus' ? [payload.serial] : payload.serials);
         const now = new Date().toISOString();
         setData((d) => ({ ...d, devices: d.devices.map((x) => (hit.has(x.Serial) ? { ...x, Status: payload.status, LastUpdated: now, FaultReason: payload.status === 'Not-Working' ? payload.fault : null } : x)) }));
-      } else if (action !== 'lookupGC') await load();
+      } else if (action !== 'lookupTeamLeader') await load();
       return j;
     } catch (e) { fail(e); return null; }
     finally { setBusy(false); }
@@ -476,7 +478,7 @@ function Main({ url, setUrl, auth, logout }) {
         {tab === 'log' && <StatusLog log={data.statusLog} devices={data.devices} />}
         {tab === 'hhdaudit' && <DeviceAudit sites={own} devices={data.devices} push={push} busy={busy} />}
         {tab === 'auditlog' && <AuditLog audits={data.audits || []} />}
-        {tab === 'shift' && <ShiftHandover site={site} users={data.users} devices={data.devices} custody={data.custody || []} logs={data.logs || []} push={push} busy={busy} flash={flash} />}
+        {tab === 'shift' && <ShiftHandover site={site} me={auth} users={data.users} teamLeaders={data.teamLeaders || []} devices={data.devices} custody={data.custody || []} logs={data.logs || []} push={push} busy={busy} flash={flash} />}
         {tab === 'config' && admin && <Config url={url} setUrl={setUrl} load={load} data={data} me={auth} flash={flash} />}
         {tab === 'admin' && admin && <Admin data={data} sites={allSites} push={push} busy={busy} flash={flash} />}
       </main>
@@ -917,6 +919,7 @@ function Admin({ data, sites, push, busy, flash }) {
       <datalist id="dl-makes">{makes.map((s) => <option key={s} value={s} />)}</datalist>
       <datalist id="dl-models">{models.map((s) => <option key={s} value={s} />)}</datalist>
       <UserAdmin users={users} push={push} busy={busy} flash={flash} />
+      <TeamLeaderAdmin teamLeaders={data.teamLeaders || []} sites={sites} push={push} busy={busy} flash={flash} />
       <ImportCsv devices={devices} push={push} busy={busy} flash={flash} />
       <div className="grid lg:grid-cols-2 gap-4">
         <AddDevice devices={devices} push={push} busy={busy} flash={flash} />
@@ -1036,7 +1039,7 @@ function AddSite({ push, busy, flash }) {
 }
 
 function UserAdmin({ users, push, busy, flash }) {
-  const blank = { username: '', name: '', role: 'user', site: '', password: '', email: '' };
+  const blank = { username: '', name: '', role: 'operations', site: '', password: '', email: '' };
   const [u, setU] = useState(blank);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState({ key: 'name', dir: 1 });
@@ -1053,7 +1056,7 @@ function UserAdmin({ users, push, busy, flash }) {
     const [h = [], ...body] = parseCSV(await f.text());
     const col = Object.fromEntries(h.map((x, i) => [x.trim().toLowerCase(), i]));
     const v = (r, k) => (col[k] === undefined ? '' : String(r[col[k]] || '').trim());
-    const rows = body.map((r) => ({ username: v(r, 'username'), name: v(r, 'name'), role: v(r, 'role') || 'user', site: v(r, 'site'), email: v(r, 'email'), password: v(r, 'password') }));
+    const rows = body.map((r) => ({ username: v(r, 'username'), name: v(r, 'name'), role: v(r, 'role') || 'operations', site: v(r, 'site'), email: v(r, 'email'), password: v(r, 'password') }));
     const j = await push('saveUsersBulk', { users: rows });
     if (j) flash(j.errors.length ? 'err' : 'ok', `${j.count} user(s) saved${j.errors.length ? `, ${j.errors.length} failed: ${j.errors.slice(0, 3).join('; ')}` : ''}`);
   };
@@ -1081,7 +1084,7 @@ function UserAdmin({ users, push, busy, flash }) {
       <form onSubmit={submit} className="grid md:grid-cols-3 gap-2">
         <Input placeholder="Username (a-z, 0-9 . _ -)" value={u.username} onChange={set('username')} />
         <Input placeholder="Full name" value={u.name} onChange={set('name')} />
-        <Select value={u.role} onChange={set('role')}><option value="user">user</option><option value="admin">admin</option></Select>
+        <Select value={u.role} onChange={set('role')}><option value="operations">Operations</option><option value="it">IT</option><option value="admin">Admin</option></Select>
         <Input placeholder='Site(s): "*" or "Site A, Site B"' list="dl-sites" value={u.site} onChange={set('site')} />
         <Input type="email" placeholder="Email (for notifications)" value={u.email} onChange={set('email')} />
         <Input type="password" autoComplete="new-password" placeholder="Password (min 10; blank = keep)" value={u.password} onChange={set('password')} />
@@ -1120,6 +1123,112 @@ function UserAdmin({ users, push, busy, flash }) {
               <td className="p-2"><button className="text-indigo-600 hover:underline" onClick={() => setU({ username: x.user, name: x.name, role: x.role, site: x.site, email: x.email || '', password: '' })}>Edit</button></td></tr>
           ))}
             {!rows.length && <tr><td colSpan={6} className="p-6 text-center text-slate-400">No users match</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+
+function TeamLeaderAdmin({ teamLeaders, sites, push, busy, flash }) {
+  const blank = { EmployeeID: '', Name: '', Site: sites[0] || '', Barcode: '', CurrentStatus: 'LIVE' };
+  const [tl, setTl] = useState(blank);
+  const [q, setQ] = useState('');
+  const [importSummary, setImportSummary] = useState('');
+  useEffect(() => {
+    if (!tl.Site && sites.length) setTl(x => ({ ...x, Site: sites[0] }));
+  }, [sites, tl.Site]);
+  const set = (k) => (e) => setTl(x => ({ ...x, [k]: e.target.value }));
+  const submit = async (e) => {
+    e.preventDefault();
+    const result = await push('saveTeamLeader', tl);
+    if (result) {
+      flash('ok', `Team Leader ${tl.EmployeeID} saved`);
+      setTl({ ...blank, Site: tl.Site });
+    }
+  };
+  const onCsv = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    const [header = [], ...body] = parseCSV(await f.text());
+    const normal = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const col = Object.fromEntries(header.map((x, i) => [normal(x), i]));
+    const get = (row, ...names) => {
+      for (const name of names) if (col[normal(name)] !== undefined) return String(row[col[normal(name)]] || '').trim();
+      return '';
+    };
+    const rows = body.map((r) => ({
+      EmployeeID: get(r, 'EmployeeID', 'Employee ID', 'Employee Id', 'TL ID', 'ID'),
+      Name: get(r, 'Name', 'Full Name'),
+      Site: get(r, 'Site', 'Location', 'Branch'),
+      Barcode: get(r, 'Barcode', 'Badge', 'Badge ID'),
+      CurrentStatus: get(r, 'CurrentStatus', 'Status') || 'LIVE',
+    }));
+    const result = await push('saveTeamLeadersBulk', { teamLeaders: rows });
+    if (result) {
+      const summary = `${result.count} Team Leader(s) saved${result.errors?.length ? `; ${result.errors.length} row(s) skipped: ${result.errors.slice(0, 4).join('; ')}` : ''}`;
+      setImportSummary(summary);
+      flash(result.errors?.length ? 'err' : 'ok', summary);
+    }
+  };
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return [...teamLeaders]
+      .filter(x => !needle || [x.EmployeeID, x.Name, x.Site, x.Barcode, x.CurrentStatus].some(v => String(v || '').toLowerCase().includes(needle)))
+      .sort((a, b) => String(a.Name || '').localeCompare(String(b.Name || '')));
+  }, [teamLeaders, q]);
+  const downloadTemplate = () => {
+    const csv = 'EmployeeID,Name,Site,Barcode,CurrentStatus\r\n';
+    const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'HHD-Team-Leader-Import-Template.csv'; a.click(); URL.revokeObjectURL(url);
+  };
+  return (
+    <Card className="p-4 space-y-3">
+      <div>
+        <h2 className="font-semibold">Team Leader master</h2>
+        <p className="text-xs text-slate-500 mt-1">Admin maintains the recipient directory. Team Leaders do not need application login accounts. A Team Leader must be active and mapped to the same site as the HHD.</p>
+      </div>
+      <form onSubmit={submit} className="grid md:grid-cols-5 gap-2">
+        <Input placeholder="Employee ID" value={tl.EmployeeID} onChange={set('EmployeeID')} />
+        <Input placeholder="Team Leader name" value={tl.Name} onChange={set('Name')} />
+        <Select value={tl.Site} onChange={set('Site')}>
+          <option value="">Select site…</option>
+          {sites.map(site => <option key={site} value={site}>{site}</option>)}
+        </Select>
+        <Input placeholder="Barcode / badge (optional)" value={tl.Barcode} onChange={set('Barcode')} />
+        <Select value={tl.CurrentStatus} onChange={set('CurrentStatus')}>
+          <option value="LIVE">Active / Live</option><option value="INACTIVE">Inactive</option>
+        </Select>
+        <Btn type="submit" disabled={busy || !tl.EmployeeID.trim() || !tl.Name.trim() || !tl.Site}>Save Team Leader</Btn>
+      </form>
+      <div className="flex flex-wrap items-center gap-3 border-t pt-3">
+        <span className="text-sm text-slate-600">Bulk add / update (CSV):</span>
+        <input type="file" accept=".csv,text/csv" onChange={onCsv} disabled={busy} className="text-sm" />
+        <Btn type="button" onClick={downloadTemplate} className="!bg-slate-600">Download CSV template</Btn>
+        <span className="text-xs text-slate-500">Columns: EmployeeID, Name, Site, Barcode, CurrentStatus</span>
+      </div>
+      {importSummary && <p className="text-xs text-slate-600">{importSummary}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+        <Input className="max-w-sm" placeholder="Search Team Leaders, ID or site…" value={q} onChange={e => setQ(e.target.value)} />
+        <span className="text-sm text-slate-500">{rows.length} of {teamLeaders.length} Team Leaders</span>
+      </div>
+      <div className="max-h-72 overflow-auto border rounded-lg">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-slate-50 text-left text-xs uppercase text-slate-500">
+            <tr><th className="p-2">Employee ID</th><th className="p-2">Name</th><th className="p-2">Site</th><th className="p-2">Barcode</th><th className="p-2">Status</th><th /></tr>
+          </thead>
+          <tbody>
+            {rows.map(x => (
+              <tr key={x.EmployeeID} className="border-t">
+                <td className="p-2 font-mono">{x.EmployeeID}</td><td className="p-2">{x.Name}</td><td className="p-2">{x.Site}</td><td className="p-2 font-mono">{x.Barcode || '—'}</td>
+                <td className="p-2"><Badge s={x.CurrentStatus || 'LIVE'} /></td>
+                <td className="p-2"><button className="text-indigo-600 hover:underline" onClick={() => setTl({ EmployeeID: x.EmployeeID, Name: x.Name, Site: x.Site, Barcode: x.Barcode || '', CurrentStatus: x.CurrentStatus || 'LIVE' })}>Edit</button></td>
+              </tr>
+            ))}
+            {!rows.length && <tr><td colSpan={6} className="p-5 text-center text-slate-400">No Team Leaders found. Add one or import a CSV.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1172,33 +1281,34 @@ const healthFunctional = (v) => String(v || '').endsWith('not_working') ? 'Not-W
 const healthDamaged = (v) => String(v || '').startsWith('damaged');
 
 const HO_MODES = [
-  ['checkout', 'Checkout (shift start)', Repeat],
-  ['checkin', 'GC → Operations receipt', Undo2],
+  ['checkout', 'IT → Operations issue', Repeat],
+  ['tlissue', 'Operations → Team Leader issue', Repeat],
+  ['tlreturn', 'Team Leader → Operations receipt', Undo2],
   ['opsit', 'Operations → IT receipt', ArrowRightLeft],
   ['swap', 'Mid-shift swap', ArrowRightLeft],
   ['redtag', 'Red tag', Flag],
   ['recon', 'Reconciliation', ListChecks],
   ['history', 'Device history', History],
-  ['adminack', 'Admin acknowledgement', ClipboardCheck],
+  ['opsaccept', 'Operations receipt acknowledgement', CheckCircle2],
+  ['itaccept', 'IT receipt acknowledgement', CheckCircle2],
 ];
-const HO_HELD = ['issued', 'overdue', 'missing', 'ops_received'];
-const HO_EVENT = { issued: 'Issued', gc_to_ops_received: 'GC → Operations received', ops_to_it_received: 'Operations → IT received', admin_ack_it_to_admin: 'Admin acknowledged IT handover', admin_ack_admin_to_it: 'Admin acknowledged IT return', returned: 'Returned', returned_late: 'Returned late', returned_damaged: 'Returned damaged', swap_out: 'Swap out', swap_in: 'Swap in', flagged: 'Red-tagged' };
+const HO_HELD = ['issued', 'overdue', 'missing', 'ops_received', 'ops_to_it_pending', 'it_to_ops_pending'];
+const HO_EVENT = { issued: 'Issued', tl_issued: 'Operations → Team Leader issued', it_to_ops_sent: 'IT → Operations sent (pending)', it_to_ops_received: 'IT → Operations received by Operations', holder_to_ops_received: 'Team Leader → Operations received', gc_to_ops_received: 'Previous holder → Operations received (legacy)', ops_to_it_sent: 'Operations → IT sent (pending)', ops_to_it_received: 'Operations → IT received by IT', returned: 'Returned', returned_late: 'Returned late', returned_damaged: 'Returned damaged', swap_out: 'Swap out', swap_in: 'Swap in', tl_swap_out: 'Team Leader swap out', tl_swap_in: 'Team Leader swap in', flagged: 'Red-tagged', maintenance_cleared: 'IT maintenance clearance' };
 // fixed, location-independent shifts; end times are set by the server
 const SHIFT_OPTS = [['A', 'Shift A (ends 15:00)'], ['B', 'Shift B (ends 23:00)'], ['C', 'Shift C (ends 07:00)'], ['G', 'General (ends 19:00)']];
 
-function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash }) {
-  const [mode, setMode] = useState('checkout');
+function ShiftHandover({ site, users, devices, custody, logs, me, push, busy, flash }) {
+  const [mode, setMode] = useState(() => me.role === 'it' ? 'checkout' : ['operations','user'].includes(me.role) ? 'opsaccept' : 'recon');
   const [shiftId, setShiftId] = useState('');
   const [toUser, setToUser] = useState('');   // swap: scanned recipient identifier
   const [recipient, setRecipient] = useState(null);
   const [cameraTarget, setCameraTarget] = useState('');
-  const [gcScan, setGcScan] = useState('');
-  const [selectedGc, setSelectedGc] = useState(null);
+  const [tlScan, setTlScan] = useState('');
+  const [selectedTL, setSelectedTL] = useState(null);
   const [scan, setScan] = useState('');
   const [queue, setQueue] = useState([]);     // serials, in scan order
   const [insp, setInsp] = useState({});       // serial -> {result, fault, note}
   const [hq, setHq] = useState('');
-  const [ackDirection, setAckDirection] = useState('it_to_admin');
   const byS = useMemo(() => Object.fromEntries(devices.map((d) => [d.Serial, d])), [devices]);
   const byC = useMemo(() => Object.fromEntries(custody.map((c) => [c.Serial, c])), [custody]);
   const byImei = useMemo(() => {
@@ -1210,38 +1320,39 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
   const people = users.filter((u) => hasSite(u, site));
   const now = Date.now();
   const live = (c) => (c.Status === 'issued' && new Date(c.DueAt) < now ? 'overdue' : c.Status);
-  const who = (un) => (un ? nameOf[un] || un : '—');
+  const who = (un) => (!un ? '—' : String(un).toUpperCase() === 'OPERATIONS' ? 'Site Operations' : String(un).toUpperCase() === 'IT' ? 'IT Department' : nameOf[un] || un);
 
-  useEffect(() => { setQueue([]); setInsp({}); setSelectedGc(null); setGcScan(''); setToUser(''); setRecipient(null); }, [mode, site]);
+  useEffect(() => { setQueue([]); setInsp({}); setSelectedTL(null); setTlScan(''); setToUser(''); setRecipient(null); }, [mode, site]);
+  useEffect(() => { if (me.role === 'it' && ['tlreturn','opsaccept','opsit','swap','tlissue'].includes(mode)) setMode('checkout'); else if (['operations','user'].includes(me.role) && mode === 'checkout') setMode('opsaccept'); }, [me.role]);
 
-  // GC card can carry either Employee ID or Valinor ID; the backend validates both against the GC master.
-  const scanGC = async () => {
-    const code = gcScan.trim().toUpperCase();
+  // Team Leader ID or barcode is validated against the Admin-maintained Team Leader master.
+  const scanTeamLeader = async () => {
+    const code = tlScan.trim().toUpperCase();
     if (!code) return;
-    setGcScan('');
-    const j = await push('lookupGC', { gcId: code, site });
-    if (j?.gc) {
-      if (selectedGc && selectedGc.EmployeeID !== j.gc.EmployeeID && queue.length) {
-        return flash('err', 'Clear the current HHD queue before switching to another GC');
+    setTlScan('');
+    const j = await push('lookupTeamLeader', { teamLeaderId: code, site });
+    if (j?.teamLeader) {
+      if (selectedTL && selectedTL.EmployeeID !== j.teamLeader.EmployeeID && queue.length) {
+        return flash('err', 'Clear the current HHD queue before switching to another Team Leader');
       }
-      setSelectedGc(j.gc);
-      flash('ok', `GC verified: ${j.gc.Name} (${j.gc.EmployeeID})`);
+      setSelectedTL(j.teamLeader);
+      flash('ok', `Team Leader verified: ${j.teamLeader.Name} (${j.teamLeader.EmployeeID})`);
     }
   };
 
   const scanRecipient = async (raw = toUser) => {
     const code = String(raw || '').trim().toUpperCase();
     if (!code) return;
-    const j = await push('lookupHandoverRecipient', { personId: code, site });
-    if (j?.recipient) { setRecipient(j.recipient); setToUser(code); flash('ok', `Recipient verified: ${j.recipient.name} (${j.recipient.id})`); }
+    const j = await push('lookupTeamLeader', { teamLeaderId: code, site });
+    if (j?.teamLeader) { const tlRecipient = { id: j.teamLeader.EmployeeID, key: j.teamLeader.EmployeeID, name: j.teamLeader.Name, type: 'Team Leader' }; setRecipient(tlRecipient); setToUser(code); flash('ok', `Team Leader verified: ${tlRecipient.name} (${tlRecipient.id})`); }
   };
 
-  // scan a serial or IMEI. Handover requires a valid GC to be scanned first.
+  // Scan a serial or IMEI. Team Leader issue requires a valid Team Leader to be scanned first.
   const add = () => {
     const code = scan.trim().toUpperCase();
     setScan('');
     if (!code) return;
-    if (mode === 'checkout' && !selectedGc) return flash('err', 'Scan and verify the GC ID before scanning an HHD');
+    if (mode === 'tlissue' && !selectedTL) return flash('err', 'Scan and verify the Team Leader ID before scanning an HHD');
     const hits = byS[code] ? [byS[code]] : byImei[code] || [];
     if (hits.length > 1) return flash('err', `${code}: IMEI shared by ${hits.length} devices, scan the serial`);
     if (!hits.length) return flash('err', `${code}: HHD not found in Master Inventory. Register the device before handover.`);
@@ -1250,15 +1361,15 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
     setQueue((q) => [...q, s]);
   };
 
-  // red tag is always damaged; check-in is damaged only if the inspector says so
+  // red tag is always damaged; Team Leader return is damaged only if the inspector says so
   const isDamaged = (s) => mode === 'redtag' || insp[s]?.result === 'damaged' || healthFunctional(insp[s]?.healthCondition || '') === 'Not-Working';
   const faultMissing = (s) => isDamaged(s) && !(insp[s]?.fault && (insp[s].fault !== OTHER || insp[s]?.note?.trim()));
   const swapFrom = queue.length ? byC[queue[0]]?.HolderUser || '' : '';
   const ready = !busy && queue.length > 0 && !queue.some(faultMissing)
-    && (mode === 'redtag' || mode === 'adminack' || shiftId !== '')
-    && (mode !== 'checkout' || !!selectedGc)
+    && (['redtag','itaccept','opsaccept','checkout'].includes(mode) || shiftId !== '')
+    && (mode !== 'tlissue' || (!!selectedTL && !!shiftId))
     && (mode !== 'swap' || !!recipient)
-    && !(mode === 'checkout' && queue.some((s) => healthFunctional(insp[s]?.healthCondition || 'good_working') === 'Not-Working'));
+    && !(['checkout','tlissue','swap'].includes(mode) && queue.some((s) => (insp[s]?.healthCondition || 'good_working') !== 'good_working'));
 
   // one save for the whole batch; the server issues each device to the worker chosen on its row
   const submit = async () => {
@@ -1268,16 +1379,15 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
       return [s, { result: dmg ? 'damaged' : 'ok', healthCondition: i.healthCondition || (dmg ? 'damaged_working' : 'good_working'), functionalStatus: healthFunctional(i.healthCondition || (dmg ? 'damaged_working' : 'good_working')), fault: dmg ? faultText(i.fault || '', i.note || '') : '', notes: i.note || '' }];
     }));
     let j = null, msg = '';
-    if (mode === 'checkout') {
-      j = await push('shiftIssue', { site, shiftId, gcId: selectedGc.EmployeeID, serials: queue, inspections });
-      msg = `Issued ${queue.length} device(s) to ${selectedGc.Name} (${selectedGc.EmployeeID})`;
-    }
-    if (mode === 'checkin') { j = await push('shiftReturn', { site, shiftId, serials: queue, inspections }); msg = `Received ${queue.length} device(s) into Operations custody`; }
-    if (mode === 'opsit') { j = await push('opsTransferToIT', { site, shiftId, serials: queue, inspections }); msg = `IT acknowledged receipt of ${queue.length} device(s)`; }
+    if (mode === 'checkout') { j = await push('shiftIssue', { site, serials: queue, inspections }); msg = `Issued ${queue.length} device(s) to Site Operations; awaiting acknowledgement`; }
+    if (mode === 'tlissue') { j = await push('opsIssueToTL', { site, shiftId, teamLeaderId: selectedTL.EmployeeID, serials: queue, inspections }); msg = `Issued ${queue.length} device(s) to ${selectedTL.Name}`; }
+    if (mode === 'tlreturn') { j = await push('opsReceiveFromTL', { site, shiftId, serials: queue, inspections }); msg = `Received ${queue.length} device(s) from the Team Leader into Operations custody`; }
+    if (mode === 'opsit') { j = await push('opsTransferToIT', { site, shiftId, serials: queue, inspections }); msg = `${queue.length} device(s) sent to IT; awaiting IT acceptance`; }
+    if (mode === 'opsaccept') { j = await push('opsAcknowledgeITIssue', { site, serials: queue, inspections }); msg = `Operations acknowledged receipt of ${queue.length} device(s) from IT`; }
+    if (mode === 'itaccept') { j = await push('itAcknowledgeOpsTransfer', { site, serials: queue, inspections }); msg = `IT accepted ${queue.length} device(s) from Operations`; }
     if (mode === 'swap') { j = await push('shiftSwap', { site, shiftId, recipient, inspections, serials: queue }); msg = `Transferred ${queue.length} device(s) to ${recipient?.name || 'recipient'}`; }
     if (mode === 'redtag') { j = await push('flagRedTag', { site, serials: queue, inspections }); msg = `Red-tagged ${queue.length} device(s)`; }
-    if (mode === 'adminack') { j = await push('adminAcknowledge', { site, serials: queue, direction: ackDirection }); msg = `Admin process acknowledgement recorded for ${queue.length} device(s)`; }
-    if (j) { flash('ok', msg); setQueue([]); setInsp({}); if (mode === 'checkout') setSelectedGc(null); }
+    if (j) { flash('ok', msg); setQueue([]); setInsp({}); if (mode === 'tlissue') setSelectedTL(null); }
   };
 
   const setI = (s, patch) => setInsp((x) => ({ ...x, [s]: { ...(x[s] || {}), ...patch } }));
@@ -1293,7 +1403,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
-        {HO_MODES.map(([id, label, Icon]) => (
+        {HO_MODES.filter(([id]) => { const role = me.role; if (role === 'admin') return true; if (id === 'checkout' || id === 'itaccept') return role === 'it'; if (id === 'tlissue' || id === 'tlreturn') return ['operations','user'].includes(role); if (id === 'opsaccept' || id === 'opsit' || id === 'swap') return ['operations','user'].includes(role); if (id === 'redtag' || id === 'recon' || id === 'history') return ['operations','it','user'].includes(role); return false; }).map(([id, label, Icon]) => (
           <button key={id} onClick={() => setMode(id)}
             className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm border ${mode === id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-300'}`}>
             <Icon size={16} /> {label}
@@ -1301,17 +1411,13 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
         ))}
       </div>
 
-      {mode === 'adminack' && (
-        <Card className="p-4 space-y-3">
-          <div className="text-sm text-slate-700">Admin records a process acknowledgement only. Physical custody remains with IT; Admin is never recorded as a device holder.</div>
-          <Select value={ackDirection} onChange={(e) => setAckDirection(e.target.value)} aria-label="Acknowledgement direction">
-            <option value="it_to_admin">IT → Admin process acknowledgement</option>
-            <option value="admin_to_it">Admin → IT process acknowledgement</option>
-          </Select>
-          <div className="text-xs text-slate-500">Scan the HHD serial/IMEI below, then record the acknowledgement.</div>
-        </Card>
-      )}
-
+      {mode === 'checkout' && <Card className="p-3 text-sm text-slate-700">IT issues HHDs to Site Operations. Devices remain pending until an authorized Operations user at this site acknowledges physical receipt.</Card>}
+      {mode === 'tlissue' && <Card className="p-3 text-sm text-slate-700">Operations can issue only HHDs already acknowledged into Site Operations custody. Scan an active Team Leader assigned to this site, then scan the HHDs.</Card>}
+      {mode === 'tlreturn' && <Card className="p-3 text-sm text-slate-700">Operations physically receives HHDs from Team Leaders and records device condition. This does not transfer custody to IT.</Card>}
+      {mode === 'swap' && <Card className="p-3 text-sm text-slate-700">Mid-shift transfer from one active Team Leader to another is restricted to Operations or Admin. The current holder and receiving Team Leader must both belong to this site. Only good, working HHDs can be swapped.</Card>}
+      {mode === 'opsaccept' && <Card className="p-3 text-sm text-slate-700">Scan HHDs issued by Site IT, inspect their condition and acknowledge receipt. Any authorized Operations user at this site can accept.</Card>}
+      {mode === 'opsit' && <Card className="p-3 text-sm text-slate-700">Operations records the HHD condition and submits the scanned devices to IT. Custody remains with Operations until an authorized IT user at this site physically verifies and accepts them.</Card>}
+      {mode === 'itaccept' && <Card className="p-3 text-sm text-slate-700">IT receipt queue: scan only devices awaiting IT acceptance from Operations. Inspect the device, record its condition and fault notes, then accept. The logged-in IT user is recorded as the receiver.</Card>}
       {mode === 'history' && (
         <div className="space-y-3">
           <Card className="p-4">
@@ -1346,16 +1452,16 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
         <div className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
             <Card className="p-3"><div className="text-xs text-slate-500">Total tracked</div><div className="text-2xl font-bold">{rows.length}</div></Card>
-            <Card className="p-3"><div className="text-xs text-slate-500">With GC</div><div className="text-2xl font-bold">{rows.filter((r) => ['issued', 'overdue', 'missing'].includes(r.Live)).length}</div></Card>
-            <Card className="p-3"><div className="text-xs text-slate-500">With Operations</div><div className="text-2xl font-bold">{rows.filter((r) => r.Live === 'ops_received').length}</div></Card>
-            <Card className="p-3"><div className="text-xs text-slate-500">With IT</div><div className="text-2xl font-bold">{rows.filter((r) => ['returned', 'maintenance'].includes(r.Live) || String(r.HolderUser || '').toUpperCase() === 'IT').length}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">With Team Leaders</div><div className="text-2xl font-bold">{rows.filter((r) => ['issued', 'overdue', 'missing'].includes(r.Live)).length}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">With Operations</div><div className="text-2xl font-bold">{rows.filter((r) => String(r.HolderUser || '').toUpperCase() === 'OPERATIONS' && ['ops_received','maintenance','ops_to_it_pending'].includes(r.Live)).length}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">With IT</div><div className="text-2xl font-bold">{rows.filter((r) => String(r.HolderUser || '').toUpperCase() === 'IT' || r.Live === 'returned').length}</div></Card>
             <Card className="p-3"><div className="text-xs text-slate-500">Overdue / Missing</div><div className="text-2xl font-bold text-red-700">{rows.filter((r) => ['overdue', 'missing'].includes(r.Live)).length}</div></Card>
             <Card className="p-3"><div className="text-xs text-slate-500">Under Maintenance</div><div className="text-2xl font-bold text-orange-700">{rows.filter((r) => r.Live === 'maintenance').length}</div></Card>
           </div>
           <Card className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr><th className="p-3">Serial</th><th className="p-3">Location</th><th className="p-3">Holder</th><th className="p-3">Issued</th><th className="p-3">Shift end</th><th className="p-3">Device status</th><th className="p-3">Custody status</th></tr>
+                <tr><th className="p-3">Serial</th><th className="p-3">Location</th><th className="p-3">Holder</th><th className="p-3">Issued</th><th className="p-3">Shift end</th><th className="p-3">Device status</th><th className="p-3">Custody status</th><th className="p-3">Action</th></tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
@@ -1365,9 +1471,10 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
                     <td className="p-3 text-slate-500">{fmt(r.IssuedAt)}</td><td className="p-3 text-slate-500">{fmt(r.DueAt)}</td>
                     <td className="p-3 text-xs">{byS[r.Serial]?.Status || '—'}</td>
                     <td className="p-3 text-xs font-medium">{r.Live}</td>
+                    <td className="p-3">{['it','admin'].includes(me.role) && r.Live === 'maintenance' && String(r.HolderUser || '').toUpperCase() === 'IT' ? <button type="button" className="text-indigo-700 hover:underline text-xs" disabled={busy || byS[r.Serial]?.Status !== 'Working'} onClick={async () => { const note = window.prompt(`Confirm IT inspection / repair clearance for ${r.Serial}. Enter a short note:`); if (note && note.trim()) { const j = await push('clearMaintenance', { site, serial: r.Serial, note: note.trim() }); if (j) flash('ok', `${r.Serial} released to available IT stock`); } }}>{byS[r.Serial]?.Status === 'Working' ? 'Release to IT stock' : 'Set device to Working first'}</button> : '—'}</td>
                   </tr>
                 ))}
-                {!rows.length && <tr><td colSpan={7} className="p-6 text-center text-slate-400">No custody records for this site</td></tr>}
+                {!rows.length && <tr><td colSpan={8} className="p-6 text-center text-slate-400">No custody records for this site</td></tr>}
               </tbody>
             </table>
           </Card>
@@ -1377,7 +1484,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
       {mode !== 'recon' && mode !== 'history' && ( 
         <>
           <Card className="p-4 grid md:grid-cols-3 gap-3">
-            {mode !== 'redtag' && mode !== 'adminack' && (
+            {!['redtag','itaccept','opsaccept','checkout'].includes(mode) && (
               <Select value={shiftId} onChange={(e) => setShiftId(e.target.value)} aria-label="Shift">
                 <option value="">Select shift…</option>
                 {SHIFT_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -1386,7 +1493,7 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
 
             {mode === 'swap' && (
               <div className="md:col-span-3 space-y-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
-                <div className="text-sm font-semibold text-indigo-900">Scan receiving person's ID (GC Employee ID / Valinor or authorized user's login ID)</div>
+                <div className="text-sm font-semibold text-indigo-900">Scan receiving Team Leader ID / barcode</div>
                 <div className="flex gap-2">
                   <Input placeholder="Scan recipient ID and press Enter" value={toUser} onChange={(e) => { setToUser(e.target.value); setRecipient(null); }} onKeyDown={(e) => e.key === 'Enter' && scanRecipient()} />
                   <Btn type="button" onClick={() => scanRecipient()} disabled={!toUser.trim() || busy}>Verify ID</Btn>
@@ -1395,33 +1502,27 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
                 {recipient && <div className="rounded bg-white border p-2 text-sm"><b>To: {recipient.name}</b> · {recipient.id} <span className="text-slate-500">({recipient.type})</span></div>}
               </div>
             )}
-            {mode === 'checkout' && (
+            {mode === 'tlissue' && (
               <div className="md:col-span-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3 space-y-2">
-                <div className="text-sm font-semibold text-indigo-900">Step 1 · Scan Ground Coordinator ID</div>
+                <div className="text-sm font-semibold text-indigo-900">Scan receiving Team Leader ID / barcode</div>
                 <div className="flex gap-2">
-                  <Input autoFocus placeholder="Scan Employee ID or Valinor ID, press Enter" value={gcScan} onChange={(e) => setGcScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && scanGC()} />
-                  <Btn onClick={scanGC} disabled={!gcScan.trim() || busy}>Verify GC</Btn><Btn type="button" className="!bg-slate-700" onClick={() => setCameraTarget('gc')}><Camera size={16}/> Scan</Btn>
+                  <Input placeholder="Scan Employee ID or barcode" value={tlScan} onChange={(e) => setTlScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && scanTeamLeader()} />
+                  <Btn onClick={scanTeamLeader} disabled={!tlScan.trim() || busy}>Verify Team Leader</Btn>
+                  <Btn type="button" className="!bg-slate-700" onClick={() => setCameraTarget('teamLeader')}><Camera size={16}/> Scan</Btn>
                 </div>
-                {selectedGc && (
-                  <div className="rounded-md bg-white border border-indigo-200 p-2 text-sm">
-                    <div className="font-semibold text-slate-900">{selectedGc.Name}</div>
-                    <div className="text-slate-600">Employee ID: {selectedGc.EmployeeID} · Valinor: {selectedGc.Valinor}</div>
-                    <div className="text-slate-600">Site: {selectedGc.BranchCode} · {selectedGc.Designation}</div>
-                    <button className="text-xs text-indigo-700 underline mt-1" onClick={() => { setSelectedGc(null); setQueue([]); setInsp({}); }}>Change GC</button>
-                  </div>
-                )}
+                {selectedTL && <div className="rounded bg-white border p-2 text-sm"><b>{selectedTL.Name}</b> · {selectedTL.EmployeeID} · {selectedTL.Site}</div>}
               </div>
             )}
             <div className="flex gap-2 md:col-span-3">
-              <Input autoFocus={mode !== 'checkout' || !!selectedGc} disabled={mode === 'checkout' && !selectedGc} placeholder={mode === 'checkout' ? 'Step 2 · Scan HHD IMEI / serial, press Enter' : 'Scan HHD IMEI / serial, press Enter'} value={scan} onChange={(e) => setScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
-              <Btn onClick={add} disabled={!scan.trim() || (mode === 'checkout' && !selectedGc)}>Add</Btn><Btn type="button" className="!bg-slate-700" onClick={() => setCameraTarget('device')}><Camera size={16}/> Scan</Btn>
+              <Input autoFocus placeholder={'Scan HHD IMEI / serial, press Enter'} value={scan} onChange={(e) => setScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+              <Btn onClick={add} disabled={!scan.trim()}>Add</Btn><Btn type="button" className="!bg-slate-700" onClick={() => setCameraTarget('device')}><Camera size={16}/> Scan</Btn>
             </div>
           </Card>
 
           <Card className="p-4 space-y-3">
             <div className="flex justify-between items-center">
               <h2 className="font-semibold">Queue ({queue.length})</h2>
-              {queue.length > 0 && <button className="text-xs text-red-600" onClick={() => { setQueue([]); setInsp({}); setSelectedGc(null); }}>Clear all</button>}
+              {queue.length > 0 && <button className="text-xs text-red-600" onClick={() => { setQueue([]); setInsp({}); setSelectedTL(null); }}>Clear all</button>}
             </div>
             {queue.length > 0 && mode === 'swap' && <div className="text-sm text-slate-600">From: <b>{byC[queue[0]]?.HolderName || swapFrom || '—'}</b> ({swapFrom || '—'}) · To: <b>{recipient?.name || 'Scan recipient ID'}</b> ({recipient?.id || '—'}) · Performed by: <b>Logged-in authorized operator</b></div>}
             <div className="divide-y">
@@ -1438,24 +1539,22 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
                       <div className="text-slate-600">IMEI/S.No: <span className="font-mono">{d.imei_number || '—'}</span> · {d.Make} {d.Model}</div>
                       {c && HO_HELD.includes(c.Status) && <div className="text-amber-700 text-xs">Currently held by {c.HolderName}{mode === 'checkout' ? ': use swap' : ''}</div>}
                       {d.Location && d.Location !== site && <div className="text-blue-700 text-xs">Will move from {d.Location} to {site}</div>}
-                      {(mode === 'checkout' || mode === 'checkin' || mode === 'opsit' || mode === 'swap' || mode === 'redtag') && (
+                      {(['checkout','tlissue','opsaccept','tlreturn','opsit','itaccept','swap','redtag'].includes(mode)) && (
                         <Select value={insp[s]?.healthCondition || (mode === 'redtag' ? 'damaged_working' : 'good_working')} onChange={(e) => setI(s, { healthCondition: e.target.value, result: healthDamaged(e.target.value) ? 'damaged' : 'ok' })} aria-label={`Device condition of ${s}`}>
                           {HEALTH_OPTIONS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
                         </Select>
                       )}
-                      {mode === 'checkout' && <div className="text-xs text-slate-500">Damaged or non-working devices cannot be issued.</div>}
-                      {mode === 'checkin' && <div className="text-xs text-slate-500">Operations physically receives the HHD from the GC. This does not transfer custody to IT.</div>}
+                      {mode === 'checkout' && <div className="text-xs text-slate-500">Issue to Site Operations only. Operations acknowledgement is required before Team Leader issue.</div>}
+                      {mode === 'tlissue' && <div className="text-xs text-slate-500">Only good, working HHDs can be issued from acknowledged Operations custody to an active Team Leader at this site.</div>}
+                      {mode === 'opsaccept' && <div className="text-xs text-slate-500">Acknowledge only after physical receipt from Site IT.</div>}
+                      {mode === 'tlreturn' && <div className="text-xs text-slate-500">Operations physically receives the HHD from the Team Leader. This does not transfer custody to IT.</div>}
                       {mode === 'opsit' && <div className="text-xs text-slate-500">Use only after Operations has received the HHD. IT receipt moves damaged/non-working devices into maintenance quarantine.</div>}
                       {isDamaged(s) && mode !== 'swap' && (
                         <FaultPick fault={insp[s]?.fault || ''} note={insp[s]?.note || ''} onFault={(v) => setI(s, { fault: v })} onNote={(v) => setI(s, { note: v })} />
                       )}
                     </div>
                     <div className="text-sm">
-                      {mode === 'checkout' && selectedGc && (
-                        <div className="rounded-md bg-indigo-50 text-indigo-900 p-2 text-xs">
-                          Handover to: <b>{selectedGc.Name}</b> · {selectedGc.EmployeeID}
-                        </div>
-                      )}
+                      {mode === 'checkout' && <div className="rounded-md bg-indigo-50 text-indigo-900 p-2 text-xs">Handover to: <b>Site Operations</b></div>}
                       {mode === 'swap' && <div className="text-slate-600">From: <b>{c?.HolderName || '—'}</b></div>}
                     </div>
                   </div>
@@ -1464,14 +1563,14 @@ function ShiftHandover({ site, users, devices, custody, logs, push, busy, flash 
               {!queue.length && <div className="py-8 text-center text-slate-400">Nothing scanned yet.</div>}
             </div>
             <Btn disabled={!ready} onClick={submit} className="w-full">
-              {mode === 'checkout' ? `Issue ${queue.length} device(s)` : mode === 'checkin' ? 'Receive into Operations custody' : mode === 'opsit' ? 'Confirm IT receipt' : mode === 'swap' ? 'Record swap' : 'Submit red tag'}
+              {mode === 'checkout' ? `Issue ${queue.length} device(s) to Operations` : mode === 'tlissue' ? `Issue ${queue.length} device(s) to Team Leader` : mode === 'opsaccept' ? 'Acknowledge IT issue' : mode === 'tlreturn' ? 'Receive from Team Leader' : mode === 'opsit' ? 'Send to IT (pending acceptance)' : mode === 'itaccept' ? 'Acknowledge Operations return' : mode === 'swap' ? 'Record Team Leader-to-Team Leader swap' : 'Submit red tag'}
             </Btn>
           </Card>
         </>
       )}
 
 
-      {cameraTarget && <CameraScanner onClose={() => setCameraTarget('')} onDetected={(value) => { const target = cameraTarget; setCameraTarget(''); if (target === 'gc') { setGcScan(value); setTimeout(() => { const code = value.trim().toUpperCase(); push('lookupGC', { gcId: code, site }).then(j => { if (j?.gc) { setSelectedGc(j.gc); flash('ok', `GC verified: ${j.gc.Name} (${j.gc.EmployeeID})`); } }); }, 0); } else if (target === 'recipient') { setToUser(value); setTimeout(() => scanRecipient(value), 0); } else { setScan(value); setTimeout(() => { const code = value.trim().toUpperCase(); const hits = byS[code] ? [byS[code]] : byImei[code] || []; if (hits.length === 1 && !queue.includes(hits[0].Serial)) setQueue(q => [...q, hits[0].Serial]); else if (!hits.length) flash('err', `${code}: not found in Master Inventory`); }, 0); } }} />}
+      {cameraTarget && <CameraScanner onClose={() => setCameraTarget('')} onDetected={(value) => { const target = cameraTarget; setCameraTarget(''); if (target === 'teamLeader') { setTlScan(value); setTimeout(() => { const code = value.trim().toUpperCase(); push('lookupTeamLeader', { teamLeaderId: code, site }).then(j => { if (j?.teamLeader) { setSelectedTL(j.teamLeader); flash('ok', `Team Leader verified: ${j.teamLeader.Name} (${j.teamLeader.EmployeeID})`); } }); }, 0); } else if (target === 'recipient') { setToUser(value); setTimeout(() => scanRecipient(value), 0); } else { setScan(value); setTimeout(() => { const code = value.trim().toUpperCase(); const hits = byS[code] ? [byS[code]] : byImei[code] || []; if (hits.length === 1 && !queue.includes(hits[0].Serial)) setQueue(q => [...q, hits[0].Serial]); else if (!hits.length) flash('err', `${code}: not found in Master Inventory`); }, 0); } }} />}
     </div>
   );
 }
