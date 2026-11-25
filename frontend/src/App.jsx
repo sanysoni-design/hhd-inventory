@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import OperationsWorkspace from './operations/OperationsWorkspace.jsx';
 import {
   LayoutDashboard, Inbox, ScanLine, Boxes, ClipboardList, Settings, RefreshCw, ShieldCheck,
   X, Search, Truck, CheckCircle2, AlertTriangle, User, MapPin, Trash2, Send, LogOut, Lock, Upload, Camera,
@@ -144,7 +145,7 @@ const session = {
   set: (a) => { try { a ? sessionStorage.setItem('hhd_auth', JSON.stringify(a)) : sessionStorage.removeItem('hhd_auth'); } catch {} },
 };
 
-export default function App() {
+function LegacyApp() {
   const [url, setUrl] = useState(() => ls('hhd_url') || DEFAULT_URL);
   const [auth, setAuth] = useState(session.get);
   const [notice, setNotice] = useState('');
@@ -152,6 +153,12 @@ export default function App() {
   const logout = useCallback((why = '') => { session.set(null); setNotice(why); setAuth(null); }, []);
   if (!auth) return <Login url={url} onLogin={login} notice={notice} />;
   return <Main url={url} setUrl={setUrl} auth={auth} logout={logout} />;
+}
+
+// Isolated Operations UI preview. Existing production routes remain unchanged.
+export default function App() {
+  const preview = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('ops-ui') === 'preview';
+  return preview ? <OperationsWorkspace /> : <LegacyApp />;
 }
 
 // No server URL field here: only admins can see/change it (Config tab).
