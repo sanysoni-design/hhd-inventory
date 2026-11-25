@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import OperationsWorkspace from './operations/OperationsWorkspace.jsx';
+import OperationsLiveWorkspace from './operations/OperationsLiveWorkspace.jsx';
 import {
   LayoutDashboard, Inbox, ScanLine, Boxes, ClipboardList, Settings, RefreshCw, ShieldCheck,
   X, Search, Truck, CheckCircle2, AlertTriangle, User, MapPin, Trash2, Send, LogOut, Lock, Upload, Camera,
@@ -157,8 +158,12 @@ function LegacyApp() {
 
 // Isolated Operations UI preview. Existing production routes remain unchanged.
 export default function App() {
-  const preview = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('ops-ui') === 'preview';
-  return preview ? <OperationsWorkspace /> : <LegacyApp />;
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const live = params.get('ops-live') === '1';
+  const preview = params.get('ops-ui') === 'preview';
+  if (live) return <OperationsLiveWorkspace />;
+  if (preview) return <OperationsWorkspace />;
+  return <LegacyApp />;
 }
 
 // No server URL field here: only admins can see/change it (Config tab).
