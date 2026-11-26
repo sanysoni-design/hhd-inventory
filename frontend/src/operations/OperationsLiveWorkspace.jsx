@@ -61,6 +61,7 @@ export default function OperationsLiveWorkspace() {
   const [hotoForm, setHotoForm] = useState({ serial: '', worker_id: '', shift: 'A', date: new Date().toISOString().slice(0, 10), type: 'handover', physical: 'good', functional: 'working', notes: '' });
   const [hotoReturnForm, setHotoReturnForm] = useState({ serial: '', physical: 'good', functional: 'working', shift: 'A', date: new Date().toISOString().slice(0, 10), notes: '' });
   const [userForm, setUserForm] = useState({ email: '', login_id: '', employee_id: '', full_name: '', role_code: 'assigned_employee', site_code: '', designation: 'Lead', process: '' });
+  const [testUserForm, setTestUserForm] = useState({ email: 'test.siteit@example.com', login_id: 'TEST-SITE-IT-001', employee_id: '', full_name: '[TEST] Site IT', role_code: 'site_it', site_code: '', designation: 'Site IT', process: '', password: '', password_confirm: '' });
   const [roleForm, setRoleForm] = useState({ role_name: '', role_code: '', description: '', scope_type: 'assigned_sites' });
   const [selectedRole, setSelectedRole] = useState('site_lead');
   const [roleAssignmentForm, setRoleAssignmentForm] = useState({ user_id: '', role_code: 'assigned_employee', site_code: '' });
@@ -292,6 +293,20 @@ export default function OperationsLiveWorkspace() {
       setUserForm((x) => ({ ...x, email: '', login_id: '', employee_id: '', full_name: '', process: '' }));
       await loadSiteData(site);
     } catch (e2) { flash(e2.message || 'User invitation failed.', 'error'); }
+  };
+  const createTestUser = async (e) => {
+    e.preventDefault();
+    if (testUserForm.password !== testUserForm.password_confirm) return flash('Test passwords do not match.', 'error');
+    if (testUserForm.password.length < 12) return flash('Use a temporary test password with at least 12 characters.', 'error');
+    try {
+      const result = await operationsApi.createTestUser({
+        ...testUserForm,
+        site_code: testUserForm.site_code || site,
+      });
+      flash(`Test account ${result.profile?.login_id || testUserForm.login_id} created and activated. No email was sent.`);
+      setTestUserForm((x) => ({ ...x, email: '', login_id: '', employee_id: '', full_name: '', process: '', password: '', password_confirm: '' }));
+      await loadSiteData(site);
+    } catch (e2) { flash(e2.message || 'Test account creation failed.', 'error'); }
   };
 
   const assignAdditionalRole = async (e) => {
@@ -537,7 +552,23 @@ export default function OperationsLiveWorkspace() {
             <Field label="Process"><input value={userForm.process} onChange={(e) => setUserForm({ ...userForm, process: e.target.value })}/></Field>
             <div className="ol-form-actions"><Button type="submit" disabled={busy}>Create account and send invitation</Button></div>
           </form>
-          <div className="ol-form-note">Supabase Auth invitation email/SMTP and the live invite redirect must be configured before creating users.</div>
+          <div className="ol-form-note">Supabase Auth invitation email/SMTP and the live invite redirect must be configured before creating real users.</div>
+        </Panel>}
+        {isAdmin && can('admin_users', 'create') && <Panel title="Create test account — no email sent" subtitle="Temporary acceptance-test accounts only. The existing Admin account is used to test the Admin role.">
+          <div className="ol-alert ol-alert-info">Test accounts use reserved @example.com addresses, TEST-prefixed Login IDs/Employee IDs and a manually supplied temporary password. They are created as email-confirmed users without invoking SMTP. Do not use this form for real employees.</div>
+          <form className="ol-form-grid" onSubmit={createTestUser}>
+            <Field label="Test full name"><input value={testUserForm.full_name} onChange={(e) => setTestUserForm({ ...testUserForm, full_name: e.target.value })} placeholder="[TEST] Site IT" required/></Field>
+            <Field label="Reserved test email (@example.com)"><input type="email" value={testUserForm.email} onChange={(e) => setTestUserForm({ ...testUserForm, email: e.target.value })} placeholder="test.user@example.com" required/></Field>
+            <Field label="Login ID (must start TEST-)"><input value={testUserForm.login_id} onChange={(e) => setTestUserForm({ ...testUserForm, login_id: e.target.value.toUpperCase() })} required/></Field>
+            <Field label="Employee ID (required except Site IT)"><input value={testUserForm.employee_id} onChange={(e) => setTestUserForm({ ...testUserForm, employee_id: e.target.value.toUpperCase() })} placeholder="TEST-EMP-001"/></Field>
+            <Field label="Role"><select value={testUserForm.role_code} onChange={(e) => { const role = e.target.value; const defaults = { site_it: { designation: 'Site IT', employee_id: '' }, operations_spoc: { designation: 'Operations SPOC', employee_id: 'TEST-OPS-001' }, site_lead: { designation: 'Lead', employee_id: 'TEST-LEAD-001' }, assigned_employee: { designation: 'AM', employee_id: 'TEST-EMP-001' } }; setTestUserForm((x) => ({ ...x, role_code: role, ...defaults[role] })); }}><option value="site_it">Site IT</option><option value="operations_spoc">Operations SPOC</option><option value="site_lead">Site Lead</option><option value="assigned_employee">Assigned Employee</option></select></Field>
+            <Field label="Site scope"><select value={testUserForm.site_code || site} onChange={(e) => setTestUserForm({ ...testUserForm, site_code: e.target.value })}>{siteOptions.map((s) => <option key={s} value={s}>{s}</option>)}</select></Field>
+            <Field label="Designation"><input value={testUserForm.designation} onChange={(e) => setTestUserForm({ ...testUserForm, designation: e.target.value })} placeholder="Site IT / Operations SPOC / Lead / AM"/></Field>
+            <Field label="Process"><input value={testUserForm.process} onChange={(e) => setTestUserForm({ ...testUserForm, process: e.target.value })} placeholder="Inbound / Outbound / Processing"/></Field>
+            <Field label="Temporary password (12+ characters)"><input type="password" value={testUserForm.password} onChange={(e) => setTestUserForm({ ...testUserForm, password: e.target.value })} autoComplete="new-password" minLength={12} required/></Field>
+            <Field label="Confirm temporary password"><input type="password" value={testUserForm.password_confirm} onChange={(e) => setTestUserForm({ ...testUserForm, password_confirm: e.target.value })} autoComplete="new-password" minLength={12} required/></Field>
+            <div className="ol-form-actions"><Button type="submit" disabled={busy}>Create test account without email</Button></div>
+          </form>
         </Panel>}
         {can('admin_users', 'update') && <Panel title="Assign an additional role" subtitle="Role assignments are site-scoped. Admin is the only role permitted to have global (*) scope.">
           <form className="ol-form-grid ol-form-compact" onSubmit={assignAdditionalRole}>

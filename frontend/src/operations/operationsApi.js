@@ -228,6 +228,17 @@ export const operationsApi = {
     designation: user.designation || null,
     process: user.process || null,
   }),
+  createTestUser: (user) => invoke('admin-create-test-user', {
+    email: user.email,
+    password: user.password,
+    login_id: user.login_id,
+    employee_id: user.employee_id || null,
+    full_name: user.full_name,
+    role_code: user.role_code,
+    site_code: user.site_code,
+    designation: user.designation || null,
+    process: user.process || null,
+  }),
   createOrAdjustAllocation: (allocation) => rpc('hhd_create_or_adjust_allocation', {
     p_site_code: allocation.site_code,
     p_employee_id: allocation.employee_id,
