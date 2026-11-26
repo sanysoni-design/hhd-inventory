@@ -7,12 +7,12 @@
 
 do $$
 declare
-  v_email text := lower(trim('REPLACE_WITH_FIRST_ADMIN_EMAIL'));
+  v_email text := lower(trim('sany.soni@shadowfax.in'));
   v_user_id uuid;
   v_name text;
 begin
-  if v_email = '' or v_email = 'replace_with_first_admin_email' then
-    raise exception 'Replace REPLACE_WITH_FIRST_ADMIN_EMAIL before running this bootstrap.';
+  if v_email = '' or v_email = 'sany.soni@shadowfax.in' then
+    raise exception 'Replace sany.soni@shadowfax.in before running this bootstrap.';
   end if;
 
   select id,
@@ -56,5 +56,5 @@ end $$;
 select au.login_id, au.email, au.account_status, ura.role_code, ura.site_code, ura.is_active
 from public.app_users au
 join public.user_role_assignments ura on ura.user_id=au.user_id
-where lower(au.email)=lower('REPLACE_WITH_FIRST_ADMIN_EMAIL')
+where lower(au.email)=lower('sany.soni@shadowfax.in')
   and ura.role_code='admin';
