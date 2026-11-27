@@ -220,6 +220,9 @@ begin
   end if;
 
   if p_action='handover' then
+    if v_pos.physical_condition<>'good' or v_pos.functional_condition<>'working' then
+      return jsonb_build_object('valid',false,'reason','Damaged or non-working HHD cannot be handed to a GC / TL. Return it to IT for inspection.');
+    end if;
     if v_pos.current_holder_type='offroll' then
       return jsonb_build_object(
         'valid',true,'requires_swap',true,
@@ -230,9 +233,6 @@ begin
     if not ((v_pos.owner_department='operations' and v_pos.stock_state='assigned' and v_pos.current_holder_type='onroll' and v_pos.current_holder_employee_id=v_assignment.employee_id)
       or (v_pos.owner_department='it' and v_pos.stock_state='available' and v_pos.current_holder_type is null)) then
       return jsonb_build_object('valid',false,'reason','HHD is not in an eligible IT or primary-custodian position for handover.');
-    end if;
-    if v_pos.physical_condition<>'good' or v_pos.functional_condition<>'working' then
-      return jsonb_build_object('valid',false,'reason','Damaged or non-working HHD cannot be handed to a GC / TL. Return it to IT for inspection.');
     end if;
   elsif p_action='takeover' then
     if v_pos.current_holder_type is distinct from 'offroll' or v_pos.stock_state<>'assigned' or v_pos.owner_department<>'operations' then
@@ -321,6 +321,10 @@ begin
 
   select * into v_pos from public.device_stock_positions where device_serial=v_serial for update;
   if not found or v_pos.site_code<>p_site_code then raise exception 'Device is not registered at the selected site'; end if;
+
+  if v_pos.physical_condition<>'good' or v_pos.functional_condition<>'working' then
+    raise exception 'Device is recorded as damaged or non-working. It cannot be issued to a GC / TL';
+  end if;
 
   if p_transaction_type='handover' then
     if v_pos.current_holder_type='offroll' then raise exception 'Device is currently held by another GC / TL. Use Mid-shift Swap'; end if;
