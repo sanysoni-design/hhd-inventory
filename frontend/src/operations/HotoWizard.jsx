@@ -332,7 +332,7 @@ export default function HotoWizard({ site, onComplete }) {
     if (flow === 'handover' && !worker) return fail('GC / TL validation is required before handover.');
     if (flow === 'swap' && !toWorker) return fail('Receiving GC / TL validation is required before swap.');
     if (flow !== 'takeover' && (physical !== 'good' || functional !== 'working')) {
-      fail('A damaged or non-working HHD cannot be issued to a GC / TL. Use Takeover to receive it into IT quarantine, or resolve the device condition first.');
+      fail('A damaged or non-working HHD cannot be issued to a GC / TL. Use Takeover to return it to Operations quarantine, or resolve the device condition first.');
       return;
     }
     setBusy(true);
@@ -340,7 +340,7 @@ export default function HotoWizard({ site, onComplete }) {
     try {
       let result;
       if (flow === 'takeover') {
-        result = await operationsApi.takeoverHotoToIT({
+        result = await operationsApi.takeoverHotoToOperations({
           device_serial: device.serial,
           site_code: site,
           shift_code: shift,
@@ -427,7 +427,7 @@ export default function HotoWizard({ site, onComplete }) {
             <span className="hw-process-icon"><ArrowRight size={22}/></span><strong>Handover</strong><p>Issue an HHD to a GC / TL for the shift.</p><small>START HANDOVER <ArrowRight size={14}/></small>
           </button>
           <button type="button" className="hw-process-card" onClick={() => startFlow('takeover')}>
-            <span className="hw-process-icon"><Package size={22}/></span><strong>Takeover</strong><p>Receive an HHD back from the current GC / TL into IT custody.</p><small>START TAKEOVER <ArrowRight size={14}/></small>
+            <span className="hw-process-icon"><Package size={22}/></span><strong>Takeover</strong><p>Receive an HHD back from the current GC / TL into Operations inventory.</p><small>START TAKEOVER <ArrowRight size={14}/></small>
           </button>
           <button type="button" className="hw-process-card" onClick={() => startFlow('swap')}>
             <span className="hw-process-icon"><RefreshCw size={22}/></span><strong>Mid-shift swap</strong><p>Transfer an HHD from its current holder to another GC / TL.</p><small>START SWAP <ArrowRight size={14}/></small>
@@ -498,11 +498,11 @@ export default function HotoWizard({ site, onComplete }) {
             <div className="hw-current-holder"><small>PREVIOUS HOLDER</small><strong>{currentHolder?.employee_name || currentHolder?.employee_id}</strong><span>{currentHolder?.employee_id}</span></div>
             <div className="hw-person-summary"><UserRound size={19}/><div><small>RECEIVING GC / TL</small><strong>{toWorker?.employee_name} · {toWorker?.employee_id}</strong><span>{toWorker?.worker_type}{toWorker?.manual_override ? ' · Manual override' : ' · HR master validated'}</span></div></div>
           </>}
-          {flow === 'takeover' && <div className="hw-current-holder"><small>RETURNED BY GC / TL</small><strong>{currentHolder?.employee_name || currentHolder?.employee_id || 'Current holder'}</strong><span>{currentHolder?.employee_id || '—'} · Destination: IT Department</span></div>}
+          {flow === 'takeover' && <div className="hw-current-holder"><small>RETURNED BY GC / TL</small><strong>{currentHolder?.employee_name || currentHolder?.employee_id || 'Current holder'}</strong><span>{currentHolder?.employee_id || '—'} · Destination: Operations Inventory</span></div>}
           {deviceSummary}
           <ConditionPicker physical={physical} functional={functional} onPhysical={setPhysical} onFunctional={setFunctional} notes={notes} onNotes={setNotes}/>
-          {flow !== 'takeover' && (physical !== 'good' || functional !== 'working') && <div className="hw-alert hw-alert-error"><ShieldAlert size={17}/><span>Damaged or non-working HHDs cannot be handed to a GC / TL. Use Takeover to return them to IT quarantine.</span></div>}
-          {flow === 'takeover' && (physical !== 'good' || functional !== 'working') && <div className="hw-alert hw-alert-warn"><AlertTriangle size={17}/><span>This HHD will be received by IT into quarantine, not available stock.</span></div>}
+          {flow !== 'takeover' && (physical !== 'good' || functional !== 'working') && <div className="hw-alert hw-alert-error"><ShieldAlert size={17}/><span>Damaged or non-working HHDs cannot be handed to a GC / TL. Use Takeover to return them to Operations quarantine.</span></div>}
+          {flow === 'takeover' && (physical !== 'good' || functional !== 'working') && <div className="hw-alert hw-alert-warn"><AlertTriangle size={17}/><span>This HHD will be received into Operations quarantine, not available stock.</span></div>}
           <div className="hw-confirm-meta"><span>Shift {shift}</span><span>Transaction date: {localDate()}</span><span>Time: captured automatically on save</span></div>
           {actionButton(`Confirm ${flow === 'swap' ? 'swap' : flow}`, submitTransaction, flow !== 'takeover' && (physical !== 'good' || functional !== 'working'))}
         </div>
@@ -512,7 +512,7 @@ export default function HotoWizard({ site, onComplete }) {
         <div className="hw-success-icon"><CheckCircle2 size={31}/></div>
         <div className="hw-eyebrow">TRANSACTION RECORDED</div>
         <h1>{flow === 'handover' ? 'Handover completed' : flow === 'takeover' ? 'Takeover completed' : 'Mid-shift swap completed'}</h1>
-        <p>{flow === 'handover' ? `HHD mapped to ${worker?.employee_name}.` : flow === 'takeover' ? 'HHD received into IT custody.' : `HHD transferred to ${toWorker?.employee_name}.`}</p>
+        <p>{flow === 'handover' ? `HHD mapped to ${worker?.employee_name}.` : flow === 'takeover' ? 'HHD received into Operations inventory.' : `HHD transferred to ${toWorker?.employee_name}.`}</p>
         <div className="hw-success-card">
           <SummaryRow label="Reference" value={success?.hoto_id || 'Recorded'}/>
           <SummaryRow label="Shift" value={shift}/>
@@ -523,7 +523,7 @@ export default function HotoWizard({ site, onComplete }) {
           <SummaryRow label="Condition" value={`${pretty(physical)} · ${pretty(functional)}`}/>
           <SummaryRow label="Date & time" value={success?.timestamp}/>
           <SummaryRow label="Validation" value={(worker?.manual_override || toWorker?.manual_override) ? 'Manual override recorded' : 'HR master validated'}/>
-          {flow === 'takeover' && <SummaryRow label="IT stock result" value={physical === 'good' && functional === 'working' ? 'Available' : 'Quarantined'}/>}
+          {flow === 'takeover' && <SummaryRow label="Operations stock result" value={physical === 'good' && functional === 'working' ? 'Available' : 'Quarantined'}/>}
         </div>
         <button type="button" className="hw-primary hw-primary-wide" onClick={resetTransaction}>Start another HOTO <ArrowRight size={17}/></button>
       </section>}
