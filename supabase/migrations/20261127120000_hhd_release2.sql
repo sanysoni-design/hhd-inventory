@@ -601,8 +601,13 @@ declare
   v_scope text;
   v_rows jsonb;
 begin
-  v_scope := public.hhd_permission_scope('sto','view',p_site_code);
-  if v_scope is null then raise exception 'Forbidden: STO view permission required'; end if;
+  v_scope := coalesce(
+    public.hhd_permission_scope('sto','view',p_site_code),
+    public.hhd_permission_scope('sto','receive',p_site_code),
+    public.hhd_permission_scope('sto','dispatch',p_site_code),
+    public.hhd_permission_scope('sto','create',p_site_code)
+  );
+  if v_scope is null then raise exception 'Forbidden: STO view, receive or dispatch permission required'; end if;
 
   select coalesce(jsonb_agg(to_jsonb(x) order by x.dispatched_at desc),'[]'::jsonb)
   into v_rows
