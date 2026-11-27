@@ -245,6 +245,9 @@ export const operationsApi = {
   assignRole: (userId, roleCode, siteCode) => rpc('hhd_admin_assign_role', {
     p_user_id: userId, p_role_code: roleCode, p_site_code: siteCode,
   }),
+  assignRoleSites: (userId, roleCode, siteCodes) => rpc('hhd_admin_assign_role_sites', {
+    p_user_id: userId, p_role_code: roleCode, p_site_codes: siteCodes,
+  }),
   revokeRole: (userId, roleCode, siteCode, reason) => rpc('hhd_admin_revoke_role', {
     p_user_id: userId, p_role_code: roleCode, p_site_code: siteCode, p_reason: reason,
   }),
