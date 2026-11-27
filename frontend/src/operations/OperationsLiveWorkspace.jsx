@@ -817,14 +817,14 @@ export default function OperationsLiveWorkspace() {
         <form className="ol-form-grid" onSubmit={reconcilePosition}>
           <Field label="Scan device Serial / unique IMEI"><ScanInput value={reconcileForm.device_serial} onChange={(value) => setReconcileForm((x) => ({ ...x, device_serial: value }))} required/></Field>
           <Field label="Site"><select value={reconcileForm.site_code || site} onChange={(e) => setReconcileForm({ ...reconcileForm, site_code: e.target.value })}>{siteOptions.map((s) => <option key={s}>{s}</option>)}</select></Field>
-          <Field label="Current owner department"><select value={reconcileForm.owner_department} onChange={(e) => setReconcileForm({ ...reconcileForm, owner_department: e.target.value })}>{['operations','it','superstore','in_transit','vendor'].map((v) => <option key={v}>{v}</option>)}</select></Field>
+          <Field label="Current owner department"><select value={reconcileForm.owner_department} onChange={(e) => setReconcileForm({ ...reconcileForm, owner_department: e.target.value })}>{['operations','superstore','in_transit','vendor'].map((v) => <option key={v}>{v}</option>)}</select></Field>
           <Field label="Stock state"><select value={reconcileForm.stock_state} onChange={(e) => setReconcileForm({ ...reconcileForm, stock_state: e.target.value })}>{['available','in_transit','quarantined','maintenance','lost','retired'].map((v) => <option key={v}>{v}</option>)}</select></Field>
           <Field label="Physical condition"><select value={reconcileForm.physical_condition} onChange={(e) => setReconcileForm({ ...reconcileForm, physical_condition: e.target.value })}><option value="good">Good</option><option value="damaged">Damaged</option><option value="unknown">Unknown</option></select></Field>
           <Field label="Functional condition"><select value={reconcileForm.functional_condition} onChange={(e) => setReconcileForm({ ...reconcileForm, functional_condition: e.target.value })}><option value="working">Working</option><option value="not_working">Not Working</option><option value="unknown">Unknown</option></select></Field>
           <Field label="Reconciliation reason"><input value={reconcileForm.reason} onChange={(e) => setReconcileForm({ ...reconcileForm, reason: e.target.value })} required/></Field>
           <div className="ol-form-actions"><Button type="submit" disabled={busy}>Save audited opening position</Button></div>
         </form>
-        <div className="ol-form-note">The form refuses to overwrite an asset with an active employee assignment. Scan duplicates and unknown serials must be resolved before reconciliation.</div>
+        <div className="ol-form-note">The form refuses to overwrite an asset with an active virtual custodian assignment. Opening reconciliation cannot move an existing HHD into Site IT; Site IT receipts must be completed against an approved STO.</div>
       </Panel>}
 
 
