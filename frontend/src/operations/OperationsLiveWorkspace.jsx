@@ -303,7 +303,7 @@ export default function OperationsLiveWorkspace() {
       setInviteMode(false);
       setInvitePassword(''); setInvitePasswordConfirm('');
       await loadContext();
-      setNotice('Invitation accepted and password set.');
+      setNotice('Password set successfully. You can now sign in.');
     } catch (e2) { setError(e2.message || 'Unable to complete invitation.'); }
     finally { setBusy(false); }
   };
@@ -582,7 +582,7 @@ export default function OperationsLiveWorkspace() {
   if (inviteMode) return (
     <div className="ol-auth-shell"><form className="ol-auth-card" onSubmit={completeInvite}>
       <div className="ol-brand"><div className="ol-brand-mark"><Boxes size={21}/></div><div><strong>HHD<span>•</span>Control</strong><small>ACCOUNT ACTIVATION</small></div></div>
-      <h1>Set your account password</h1><p className="ol-muted">Your invitation has been verified. Create a personal password to activate your application account.</p>
+      <h1>Set or reset your password</h1><p className="ol-muted">Your secure account link has been verified. Set a new password to continue.</p>
       <Field label="New password"><input type="password" value={invitePassword} onChange={(e) => setInvitePassword(e.target.value)} minLength={6} maxLength={72} autoComplete="new-password" required/></Field>
       <Field label="Confirm password"><input type="password" value={invitePasswordConfirm} onChange={(e) => setInvitePasswordConfirm(e.target.value)} minLength={6} maxLength={72} autoComplete="new-password" required/></Field>
       {error && <div className="ol-alert ol-alert-error">{error}</div>}
@@ -754,14 +754,6 @@ export default function OperationsLiveWorkspace() {
           </form>
           <div className="ol-form-note">Admin creates and activates this account directly. Share the initial password with the employee through your approved secure channel; the application never stores or displays it.</div>
         </Panel>}
-        {can('admin_users', 'update') && <Panel title="Assign an additional role" subtitle="Role assignments are site-scoped. Admin is the only role permitted to have global (*) scope.">
-          <form className="ol-form-grid ol-form-compact" onSubmit={assignAdditionalRole}>
-            <Field label="Application user"><select value={roleAssignmentForm.user_id} onChange={(e) => setRoleAssignmentForm({ ...roleAssignmentForm, user_id: e.target.value })} required><option value="">Select account</option>{users.filter((u) => u.account_status !== 'deactivated').map((u) => <option key={u.user_id} value={u.user_id}>{u.full_name} · {u.login_id}</option>)}</select></Field>
-            <Field label="Role"><select value={roleAssignmentForm.role_code} onChange={(e) => setRoleAssignmentForm({ ...roleAssignmentForm, role_code: e.target.value, site_codes: [], site_code: e.target.value === 'admin' ? '*' : site })}>{roleData.roles.map((r) => <option key={r.role_code} value={r.role_code}>{r.role_name}</option>)}</select></Field>
-            <Field label="Assigned site(s)" hint="Select one or more sites. All sites is only available for Admin."><select multiple size={Math.min(6, Math.max(3, siteOptions.length))} value={roleAssignmentForm.site_codes.length ? roleAssignmentForm.site_codes : [roleAssignmentForm.site_code || site]} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setRoleAssignmentForm({ ...roleAssignmentForm, site_codes: selected, site_code: selected[0] || '' }); }} required>{(isAdmin && roleAssignmentForm.role_code === 'admin' ? ['*'] : siteOptions).map((s) => <option key={s} value={s}>{s === '*' ? 'All sites' : s}</option>)}</select></Field>
-            <div className="ol-form-actions"><Button type="submit" disabled={busy || !roleAssignmentForm.user_id}>Assign role to selected sites</Button></div>
-          </form>
-        </Panel>}
         {editingUser && can('admin_users', 'update') && <Panel title="Edit application account" subtitle="Updates the profile and Auth identity. A new password is optional and will be reset through Supabase Auth.">
           <form className="ol-form-grid" onSubmit={saveUserChanges}>
             <Field label="Full name"><input value={editUserForm.full_name} onChange={(e) => setEditUserForm({ ...editUserForm, full_name: e.target.value })} required/></Field>
@@ -789,6 +781,14 @@ export default function OperationsLiveWorkspace() {
             <Field label="Scope type"><select value={roleForm.scope_type} onChange={(e) => setRoleForm({ ...roleForm, scope_type: e.target.value })}><option value="assigned_sites">Assigned sites</option><option value="own_records">Own records</option></select></Field>
             <Field label="Description"><input value={roleForm.description} onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })}/></Field>
             <div className="ol-form-actions"><Button type="submit">Create role</Button></div>
+          </form>
+        </Panel>}
+        {can('admin_users', 'update') && <Panel title="Assign an additional role" subtitle="Role assignments are site-scoped. Admin is the only role permitted to have global (*) scope.">
+          <form className="ol-form-grid ol-form-compact" onSubmit={assignAdditionalRole}>
+            <Field label="Application user"><select value={roleAssignmentForm.user_id} onChange={(e) => setRoleAssignmentForm({ ...roleAssignmentForm, user_id: e.target.value })} required><option value="">Select account</option>{users.filter((u) => u.account_status !== 'deactivated').map((u) => <option key={u.user_id} value={u.user_id}>{u.full_name} · {u.login_id}</option>)}</select></Field>
+            <Field label="Role"><select value={roleAssignmentForm.role_code} onChange={(e) => setRoleAssignmentForm({ ...roleAssignmentForm, role_code: e.target.value, site_codes: [], site_code: e.target.value === 'admin' ? '*' : site })}>{roleData.roles.map((r) => <option key={r.role_code} value={r.role_code}>{r.role_name}</option>)}</select></Field>
+            <Field label="Assigned site(s)" hint="Select one or more sites. All sites is only available for Admin."><select multiple size={Math.min(6, Math.max(3, siteOptions.length))} value={roleAssignmentForm.site_codes.length ? roleAssignmentForm.site_codes : [roleAssignmentForm.site_code || site]} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setRoleAssignmentForm({ ...roleAssignmentForm, site_codes: selected, site_code: selected[0] || '' }); }} required>{(isAdmin && roleAssignmentForm.role_code === 'admin' ? ['*'] : siteOptions).map((s) => <option key={s} value={s}>{s === '*' ? 'All sites' : s}</option>)}</select></Field>
+            <div className="ol-form-actions"><Button type="submit" disabled={busy || !roleAssignmentForm.user_id}>Assign role to selected sites</Button></div>
           </form>
         </Panel>}
         <Panel title="Detailed permission matrix" subtitle="Permission changes are saved to PostgreSQL and enforced again by database functions.">
@@ -864,7 +864,7 @@ export default function OperationsLiveWorkspace() {
         <div className="ol-simple-table"><table><thead><tr><th>Date/time</th><th>Asset Serial</th><th>IMEI</th><th>Event</th><th>From</th><th>To</th><th>Condition</th><th>Reference</th><th>Performed by</th></tr></thead><tbody>{movementRows.filter((m) => `${m.device_serial} ${m.imei_number} ${m.event_type} ${m.reference_id} ${m.notes}`.toLowerCase().includes(search.toLowerCase())).map((m) => <tr key={m.id}><td>{when(m.performed_at)}</td><td className="ol-mono">{m.device_serial}</td><td className="ol-mono">{m.imei_number || '—'}</td><td><Pill tone="info">{human(m.event_type)}</Pill></td><td>{m.from_department || m.from_holder_id || '—'}</td><td>{m.to_department || m.to_holder_id || '—'}</td><td>{human(m.physical_condition)} / {human(m.functional_condition)}</td><td>{m.reference_type || '—'} {m.reference_id || ''}</td><td className="ol-mono">{String(m.performed_by || '').slice(0, 8) || 'System'}</td></tr>)}</tbody></table>{!movementRows.length && <Empty title="No movement history" detail="Device movements will appear after reconciliation, allocation, return, HOTO or STO transactions."/>}</div>
       </Panel>}
 
-      <footer className="ol-footer"><span>HHD Control · Phase 1 live workspace</span><span>Backend authorization active · {site}</span></footer>
+      <footer className="ol-footer"><span>HHD Control · Release 2</span><span>Backend authorization active · {site}</span></footer>
     </main>
   </div>;
 }
