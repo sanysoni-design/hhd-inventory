@@ -284,7 +284,7 @@ export default function OperationsLiveWorkspace() {
     e.preventDefault();
     setBusy(true); setError('');
     try {
-      if (invitePassword.length < 10) throw new Error('Use a password with at least 10 characters.');
+      if (invitePassword.length < 6) throw new Error('Use a password with at least 6 characters.');
       if (invitePassword !== invitePasswordConfirm) throw new Error('Passwords do not match.');
       await setAccountPassword(invitePassword);
       setInviteMode(false);
@@ -292,6 +292,54 @@ export default function OperationsLiveWorkspace() {
       await loadContext();
       setNotice('Invitation accepted and password set.');
     } catch (e2) { setError(e2.message || 'Unable to complete invitation.'); }
+    finally { setBusy(false); }
+  };
+
+  const forgotPassword = async () => {
+    if (!loginForm.email.trim()) return flash('Enter your work email first.', 'error');
+    try {
+      setBusy(true);
+      await requestPasswordReset(loginForm.email);
+      setForgotPasswordSent(true);
+      flash('If the account exists, a password reset link has been sent to its registered email address.');
+    } catch (e) { flash(e.message || 'Password recovery could not be requested.', 'error'); }
+    finally { setBusy(false); }
+  };
+
+  const savePasswordChange = async (e) => {
+    e.preventDefault();
+    if (passwordForm.next.length < 6 || passwordForm.next.length > 72) return flash('New password must contain 6 to 72 characters.', 'error');
+    if (passwordForm.next !== passwordForm.confirm) return flash('New passwords do not match.', 'error');
+    try {
+      setBusy(true);
+      await changeAccountPassword(passwordForm.current, passwordForm.next);
+      setPasswordForm({ current: '', next: '', confirm: '' });
+      flash('Password changed successfully.');
+    } catch (e2) { flash(e2.message || 'Password change failed.', 'error'); }
+    finally { setBusy(false); }
+  };
+
+  const startEditUser = (user) => {
+    setEditingUser(user.user_id);
+    setEditUserForm({
+      user_id: user.user_id, full_name: user.full_name || '', email: user.email || '',
+      login_id: user.login_id || '', employee_id: user.employee_id || '',
+      designation: user.designation || '', process: user.process || '',
+      password: '', password_confirm: '',
+    });
+  };
+
+  const saveUserChanges = async (e) => {
+    e.preventDefault();
+    if (editUserForm.password && editUserForm.password.length < 6) return flash('Password must contain at least 6 characters.', 'error');
+    if (editUserForm.password !== editUserForm.password_confirm) return flash('Password fields do not match.', 'error');
+    try {
+      setBusy(true);
+      await operationsApi.updateUser(editUserForm);
+      setEditingUser(null);
+      flash(`Account updated for ${editUserForm.full_name}. ${editUserForm.password ? 'Password reset too.' : ''}`);
+      await loadSiteData(site);
+    } catch (e2) { flash(e2.message || 'Account update failed.', 'error'); }
     finally { setBusy(false); }
   };
 
@@ -377,9 +425,13 @@ export default function OperationsLiveWorkspace() {
   const createUser = async (e) => {
     e.preventDefault();
     try {
-      const result = await operationsApi.createUser(userForm);
-      flash(`Invitation sent to ${userForm.email}. Account status: ${result.profile?.account_status || 'invited'}.`);
-      setUserForm((x) => ({ ...x, email: '', login_id: '', employee_id: '', full_name: '', process: '' }));
+      if (userForm.password.length < 6 || userForm.password.length > 72) throw new Error('Initial password must contain 6 to 72 characters.');
+      if (userForm.password !== creatingUserPasswordConfirm) throw new Error('Initial password fields do not match.');
+      const siteCodes = userForm.site_codes.length ? userForm.site_codes : [userForm.site_code || site];
+      const result = await operationsApi.createUser({ ...userForm, site_codes: siteCodes, site_code: siteCodes[0] });
+      flash(`Account created for ${userForm.full_name}. No email was sent.`);
+      setUserForm((x) => ({ ...x, email: '', login_id: '', employee_id: '', full_name: '', process: '', password: '', site_codes: [] }));
+      setCreatingUserPasswordConfirm('');
       await loadSiteData(site);
     } catch (e2) { flash(e2.message || 'User invitation failed.', 'error'); }
   };
@@ -387,8 +439,9 @@ export default function OperationsLiveWorkspace() {
   const assignAdditionalRole = async (e) => {
     e.preventDefault();
     try {
-      await operationsApi.assignRole(roleAssignmentForm.user_id, roleAssignmentForm.role_code, roleAssignmentForm.site_code || site);
-      flash('Role assignment saved.');
+      const siteCodes = roleAssignmentForm.site_codes.length ? roleAssignmentForm.site_codes : [roleAssignmentForm.site_code || site];
+      await operationsApi.assignRoleSites(roleAssignmentForm.user_id, roleAssignmentForm.role_code, siteCodes);
+      flash('Role assignment saved for the selected site(s).');
       await loadSiteData(site);
     } catch (e2) { flash(e2.message || 'Role assignment failed.', 'error'); }
   };
@@ -454,7 +507,7 @@ export default function OperationsLiveWorkspace() {
   };
 
   const nav = useMemo(() => {
-    const items = [{ id: 'overview', label: 'Overview', icon: LayoutDashboard }];
+    const items = [{ id: 'overview', label: 'Overview', icon: LayoutDashboard }, { id: 'account', label: 'Account & Password', icon: LockKeyhole }];
     if (can('inventory', 'view')) items.push({ id: 'inventory', label: 'Inventory', icon: Boxes });
     if (can('distribution', 'view') || can('distribution', 'create') || can('employee_collection', 'view')) items.push({ id: 'allocations', label: 'Quantity allocations', icon: ListChecks });
     if (can('employee_collection', 'view') || can('employee_collection', 'scan_assign')) items.push({ id: 'my-devices', label: 'My devices & collection', icon: Smartphone });
@@ -472,7 +525,7 @@ export default function OperationsLiveWorkspace() {
 
   const filteredAllocations = allocations.filter((a) => `${a.employee_name} ${a.employee_id} ${a.process} ${a.id}`.toLowerCase().includes(search.toLowerCase()));
   const summary = workspace?.summary || {};
-  const primaryRoleName = human(primaryRole || roleAssignments[0]?.role_code);
+  const primaryRoleName = roleName(primaryRole || roleAssignments[0]?.role_code);
 
   if (initializing) return <div className="ol-auth-shell"><div className="ol-auth-card">Checking secure session…</div></div>;
 
@@ -480,8 +533,8 @@ export default function OperationsLiveWorkspace() {
     <div className="ol-auth-shell"><form className="ol-auth-card" onSubmit={completeInvite}>
       <div className="ol-brand"><div className="ol-brand-mark"><Boxes size={21}/></div><div><strong>HHD<span>•</span>Control</strong><small>ACCOUNT ACTIVATION</small></div></div>
       <h1>Set your account password</h1><p className="ol-muted">Your invitation has been verified. Create a personal password to activate your application account.</p>
-      <Field label="New password"><input type="password" value={invitePassword} onChange={(e) => setInvitePassword(e.target.value)} minLength={10} autoComplete="new-password" required/></Field>
-      <Field label="Confirm password"><input type="password" value={invitePasswordConfirm} onChange={(e) => setInvitePasswordConfirm(e.target.value)} minLength={10} autoComplete="new-password" required/></Field>
+      <Field label="New password"><input type="password" value={invitePassword} onChange={(e) => setInvitePassword(e.target.value)} minLength={6} maxLength={72} autoComplete="new-password" required/></Field>
+      <Field label="Confirm password"><input type="password" value={invitePasswordConfirm} onChange={(e) => setInvitePasswordConfirm(e.target.value)} minLength={6} maxLength={72} autoComplete="new-password" required/></Field>
       {error && <div className="ol-alert ol-alert-error">{error}</div>}
       <Button type="submit" disabled={busy || !invitePassword || !invitePasswordConfirm}>{busy ? 'Saving…' : 'Activate account'}</Button>
     </form></div>
@@ -496,6 +549,8 @@ export default function OperationsLiveWorkspace() {
       {error && <div className="ol-alert ol-alert-error">{error}</div>}
       {notice && <div className="ol-alert ol-alert-info">{notice}</div>}
       <Button type="submit" disabled={busy || !loginForm.email || !loginForm.password}>{busy ? 'Signing in…' : 'Sign in securely'}</Button>
+      <button type="button" className="ol-text-button" onClick={forgotPassword} disabled={busy || !loginForm.email}>Forgot password?</button>
+      {forgotPasswordSent && <div className="ol-alert ol-alert-info">Check your registered inbox for the password recovery link.</div>}
       <small className="ol-auth-foot">Supabase Auth · Role and site permissions are checked by the server.</small>
     </form></div>
   );
