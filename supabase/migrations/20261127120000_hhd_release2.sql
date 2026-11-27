@@ -321,6 +321,9 @@ begin
     raise exception 'Active role not found';
   end if;
   if cardinality(v_sites)=0 then raise exception 'Select at least one site'; end if;
+  if p_role_code='assigned_employee' and cardinality(v_sites)>1 then
+    raise exception 'Custodian accounts are site-bound to their On-roll Employee Master record';
+  end if;
   if '*' = any(v_sites) and (p_role_code <> 'admin' or cardinality(v_sites) <> 1) then
     raise exception 'All sites is reserved for the Admin role';
   end if;
@@ -666,8 +669,9 @@ begin
       l.from_department,l.to_department,l.from_holder_type,l.from_holder_id,
       l.to_holder_type,l.to_holder_id,l.site_code,l.reference_type,l.reference_id,
       l.physical_condition,l.functional_condition,l.notes,l.performed_by,
-      l.performed_at,l.metadata
+      l.performed_at,l.metadata,u.full_name as performed_by_name
     from public.device_movement_ledger l
+    left join public.app_users u on u.user_id=l.performed_by
     where l.site_code=p_site_code
       and (v_scope <> 'own' or l.performed_by=auth.uid())
       and (
