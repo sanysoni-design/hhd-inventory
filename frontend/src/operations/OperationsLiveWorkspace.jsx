@@ -6,8 +6,8 @@ import {
   Users, UserRoundPlus, Wrench, X,
 } from 'lucide-react';
 import {
-  consumeInviteLink, getStoredSession, operationsApi, setAccountPassword,
-  signInWithEmail, signOut,
+  changeAccountPassword, consumeInviteLink, getStoredSession, operationsApi, requestPasswordReset,
+  setAccountPassword, signInWithEmail, signOut,
 } from './operationsApi.js';
 import './operations-live.css';
 
