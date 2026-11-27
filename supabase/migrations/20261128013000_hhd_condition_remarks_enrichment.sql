@@ -68,20 +68,27 @@ revoke all on function public.hhd_enrich_condition_history_remarks() from public
 
 -- Backfill condition events already logged during the opening-reconciliation workflow.
 update public.device_condition_history h
-   set remarks=a.reason
-  from lateral (
-    select ae.reason,ae.created_at
-      from public.admin_audit_events ae
-     where ae.action_code='inventory.reconcile'
-       and ae.entity_type='device_stock_position'
-       and ae.entity_id=h.device_serial
-       and ae.actor_user_id is not distinct from h.changed_by
-       and ae.created_at between h.changed_at-interval '2 minutes' and h.changed_at+interval '2 minutes'
-       and nullif(trim(coalesce(ae.reason,'')),'') is not null
-     order by abs(extract(epoch from (ae.created_at-h.changed_at)))
-     limit 1
-  ) a
+   set remarks=(
+     select ae.reason
+       from public.admin_audit_events ae
+      where ae.action_code='inventory.reconcile'
+        and ae.entity_type='device_stock_position'
+        and ae.entity_id=h.device_serial
+        and ae.actor_user_id is not distinct from h.changed_by
+        and ae.created_at between h.changed_at-interval '2 minutes' and h.changed_at+interval '2 minutes'
+        and nullif(trim(coalesce(ae.reason,'')),'') is not null
+      order by abs(extract(epoch from (ae.created_at-h.changed_at)))
+      limit 1
+   )
  where h.reference_type='opening_reconciliation'
-   and h.remarks='opening_reconciliation';
+   and h.remarks='opening_reconciliation'
+   and exists(
+     select 1 from public.admin_audit_events ae
+      where ae.action_code='inventory.reconcile'
+        and ae.entity_type='device_stock_position'
+        and ae.entity_id=h.device_serial
+        and ae.actor_user_id is not distinct from h.changed_by
+        and ae.created_at between h.changed_at-interval '2 minutes' and h.changed_at+interval '2 minutes'
+   );
 
 commit;
