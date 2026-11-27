@@ -226,9 +226,13 @@ export const operationsApi = {
   listDeviceMovements: (siteCode, search = '', limit = 200) => rpc('hhd_list_device_movement_ledger', {
     p_site_code: siteCode, p_search: search || null, p_limit: limit,
   }),
-  createAndDispatchSto: (fromSite, toSite, scans, notes) => rpc('hhd_sto_create_dispatch', {
-    p_from_site_code: fromSite, p_to_site_code: toSite, p_scans: scans, p_notes: notes || null,
+  createStoRequest: (fromSite, toSite, toDepartment, scans, notes) => rpc('hhd_sto_create_request', {
+    p_from_site_code: fromSite, p_to_site_code: toSite, p_to_department: toDepartment,
+    p_scans: scans, p_notes: notes || null,
   }),
+  approveSto: (stoId, notes) => rpc('hhd_sto_approve', { p_sto_id: stoId, p_approval_notes: notes || null }),
+  rejectSto: (stoId, reason) => rpc('hhd_sto_reject', { p_sto_id: stoId, p_rejection_reason: reason }),
+  dispatchSto: (stoId, notes) => rpc('hhd_sto_dispatch', { p_sto_id: stoId, p_notes: notes || null }),
   receiveStoDevice: (stoId, scanValue, department, notes) => rpc('hhd_sto_receive_device', {
     p_sto_id: stoId, p_scan_value: scanValue, p_destination_department: department, p_notes: notes || null,
   }),
@@ -282,22 +286,28 @@ export const operationsApi = {
   resetUserPassword: (userId, password) => invoke('admin-manage-user', {
     action: 'reset_password', user_id: userId, password,
   }),
-  createOrAdjustAllocation: (allocation) => rpc('hhd_create_or_adjust_allocation', {
+  addAllocationQuantity: (allocation) => rpc('hhd_add_allocation_quantity', {
     p_site_code: allocation.site_code,
     p_employee_id: allocation.employee_id,
     p_process: allocation.process,
-    p_authorized_quantity: Number(allocation.authorized_quantity),
+    p_additional_quantity: Number(allocation.additional_quantity),
     p_reason: allocation.reason || null,
-    p_expected_version: allocation.expected_version ?? null,
   }),
   scanAssignDevice: (siteCode, allocationId, scanValue) => rpc('hhd_scan_assign_device', {
     p_site_code: siteCode, p_allocation_id: allocationId, p_scan_value: scanValue,
   }),
-  returnAssignedDevice: (serial, physicalCondition, functionalCondition, notes) => rpc('hhd_return_assigned_device', {
+  returnAssignedDevice: (serial, physicalCondition, functionalCondition, notes) => rpc('hhd_release_virtual_custodian_assignment', {
     p_device_serial: serial,
     p_physical_condition: physicalCondition,
     p_functional_condition: functionalCondition,
     p_notes: notes || null,
+  }),
+  listCustodianDeviceAssignments: (siteCode) => rpc('hhd_list_custodian_device_assignments', {
+    p_site_code: siteCode,
+  }),
+  getDeviceConditionDashboard: (siteCode, fromDate, toDate, search = '', limit = 300) => rpc('hhd_get_device_condition_dashboard', {
+    p_site_code: siteCode, p_from_date: fromDate, p_to_date: toDate,
+    p_search: search || null, p_limit: limit,
   }),
   recordHotoTransfer: (row) => rpc('hhd_record_hoto_transfer', {
     p_device_serial: row.device_serial,
@@ -338,7 +348,7 @@ export const operationsApi = {
     p_manual_worker_type: row.manual_worker_type || null,
     p_override_reason: row.override_reason || null,
   }),
-  takeoverHotoToIT: (row) => rpc('hhd_hoto_takeover_to_it', {
+  takeoverHotoToOperations: (row) => rpc('hhd_hoto_takeover_to_operations', {
     p_device_serial: row.device_serial,
     p_site_code: row.site_code,
     p_shift_code: row.shift_code,
