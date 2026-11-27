@@ -265,11 +265,11 @@ export default function OperationsLiveWorkspace() {
         const audit = await safe(() => operationsApi.listAuditEvents(isAdmin ? '*' : siteCode, 150), []);
         setAuditRows(Array.isArray(audit) ? audit : []);
       } else setAuditRows([]);
-      if (can('inventory', 'view')) {
+      if (can('inventory', 'view') || can('admin_audit', 'view')) {
         const movements = await safe(() => operationsApi.listDeviceMovements(siteCode, '', 200), []);
         setMovementRows(Array.isArray(movements) ? movements : []);
       } else setMovementRows([]);
-      if (can('sto', 'view')) {
+      if (can('sto', 'view') || can('sto', 'receive') || can('sto', 'dispatch') || can('sto', 'create')) {
         const sto = await safe(() => operationsApi.listSto(siteCode, 100), []);
         setStoRows(Array.isArray(sto) ? sto : []);
       } else setStoRows([]);
@@ -567,7 +567,7 @@ export default function OperationsLiveWorkspace() {
     if (can('offroll_workers', 'view') || can('offroll_workers', 'sync')) items.push({ id: 'hr', label: 'HR TL/GC master', icon: FileClock });
     if (can('inventory', 'reconcile')) items.push({ id: 'reconcile', label: 'Opening stock reconciliation', icon: Wrench });
     if (can('sto', 'view') || can('sto', 'create') || can('sto', 'dispatch') || can('sto', 'receive')) items.push({ id: 'sto', label: 'STO workflow', icon: Package });
-    if (can('inventory', 'view')) items.push({ id: 'movement', label: 'IMEI movement ledger', icon: Activity });
+    if (can('inventory', 'view') || can('admin_audit', 'view')) items.push({ id: 'movement', label: 'IMEI movement ledger', icon: Activity });
     return items;
   }, [can]);
 
