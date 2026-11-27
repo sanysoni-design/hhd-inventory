@@ -664,13 +664,13 @@ export default function OperationsLiveWorkspace() {
         <div className="ol-welcome"><div><span className="ol-eyebrow">SITE WORKSPACE</span><h2>{site || 'No site assigned'}</h2><p>Authenticated as {primaryRoleName}. Only assigned site and record permissions are available.</p></div><Pill tone="info">{currentRoles.map((r) => roleLabel(r)).join(' / ') || 'No role'}</Pill></div>
         <div className="ol-metric-grid">
           <Metric title="Available Ops stock" value={fmt(summary.available)} note="Good + working + unallocated" icon={Boxes} tone="blue"/>
-          <Metric title="Assigned devices" value={fmt(summary.assigned)} note="Primary on-roll assignments" icon={Smartphone} tone="violet"/>
+          <Metric title="GC / TL deployed HHDs" value={fmt(summary.assigned)} note="Physical devices currently held on shift" icon={Smartphone} tone="violet"/>
           <Metric title="Quarantined / maintenance" value={fmt(summary.quarantined)} note="Not eligible for collection" icon={Wrench} tone="amber"/>
           <Metric title="Lost devices" value={fmt(summary.lost)} note="Removed from available stock" icon={AlertTriangle} tone="red"/>
         </div>
         <div className="ol-two-col">
-          <Panel title="Allocation progress" subtitle="Authorized quantity versus physically collected IMEIs">
-            <div className="ol-simple-table"><table><thead><tr><th>Employee</th><th>Process</th><th>Authorized</th><th>Collected</th><th>Pending</th></tr></thead><tbody>{(workspace?.allocations || []).slice(0, 8).map((a) => <tr key={a.id}><td><strong>{a.employee_name}</strong><small>{a.employee_id}</small></td><td>{a.process}</td><td>{a.authorized_quantity}</td><td>{a.collected_quantity}</td><td><Pill tone={a.pending_quantity ? 'warning' : 'success'}>{a.pending_quantity}</Pill></td></tr>)}</tbody></table>{!(workspace?.allocations || []).length && <Empty title="No allocations found" detail="Site allocations will appear here once created."/>}</div>
+          <Panel title="Virtual custodian allocation progress" subtitle="Allocator-authorized quantity versus HHDs mapped virtually by the Asset Manager">
+            <div className="ol-simple-table"><table><thead><tr><th>Employee</th><th>Process</th><th>Authorized</th><th>Mapped</th><th>Pending mapping</th></tr></thead><tbody>{(workspace?.allocations || []).slice(0, 8).map((a) => <tr key={a.id}><td><strong>{a.employee_name}</strong><small>{a.employee_id}</small></td><td>{a.process}</td><td>{a.authorized_quantity}</td><td>{a.collected_quantity}</td><td><Pill tone={a.pending_quantity ? 'warning' : 'success'}>{a.pending_quantity}</Pill></td></tr>)}</tbody></table>{!(workspace?.allocations || []).length && <Empty title="No allocations found" detail="Site allocations will appear here once created."/>}</div>
           </Panel>
           <Panel title="Site controls" subtitle="Fast access to common operations">
             <div className="ol-shortcuts">{nav.filter((n) => n.id !== 'overview').slice(0, 6).map((n) => { const Icon = n.icon; return <button key={n.id} onClick={() => setPage(n.id)}><Icon size={18}/><span>{n.label}</span><ChevronRight size={15}/></button>; })}</div>
@@ -861,6 +861,38 @@ export default function OperationsLiveWorkspace() {
           <div className="ol-simple-table"><table><thead><tr><th>STO number</th><th>From</th><th>To</th><th>Status</th><th>Approver</th><th>Devices</th><th>Received</th><th>Actions</th></tr></thead><tbody>{stoRows.map((r) => <tr key={r.id}><td className="ol-mono">{r.sto_number}<small>{when(r.created_at)}</small></td><td>{r.from_site_code} · {human(r.from_department)}</td><td>{r.to_site_code} · {human(r.to_department)}</td><td><Pill tone={r.status === 'received' || r.status === 'approved' ? 'success' : r.status === 'rejected' || r.status === 'cancelled' ? 'danger' : 'warning'}>{human(r.status)}</Pill></td><td>{r.approved_by_name || (r.approval_required ? 'Awaiting approval' : 'Not required')}{r.approval_role_code && <small>{roleName(r.approval_role_code)}</small>}</td><td>{r.device_count}</td><td>{r.received_count}</td><td><div className="ol-actions-inline">{can('sto', 'approve') && r.status === 'pending_approval' && <><Button tone="secondary" onClick={() => approveStoRequest(r)}>Approve</Button><Button tone="danger" onClick={() => rejectStoRequest(r)}>Reject</Button></>}{can('sto', 'dispatch') && r.status === 'approved' && <Button onClick={() => dispatchStoRequest(r)}>Dispatch</Button>}</div></td></tr>)}</tbody></table>{!stoRows.length && <Empty title="No STO records" detail="Requested, approved and incoming Stock Transfer Orders will appear here."/>}</div>
         </Panel>
       </>}
+
+      {page === 'condition-dashboard' && <div>
+        <Panel title="Weekly device condition changes" subtitle="Physical and functional condition changes captured from device stock-position updates.">
+          <div className="ol-condition-toolbar">
+            <Field label="Reporting window"><select value={conditionRange} onChange={(e) => setConditionRange(e.target.value)}><option value="7">Last 7 days</option><option value="28">Last 28 days</option><option value="56">Last 8 weeks</option><option value="90">Last 90 days</option></select></Field>
+            <Field label="Search Serial / IMEI / remarks"><input value={conditionSearch} onChange={(e) => setConditionSearch(e.target.value)} placeholder="Search device or remarks"/></Field>
+            <Button tone="secondary" onClick={loadConditionDashboard} disabled={conditionLoading}>{conditionLoading ? 'Loading…' : 'Refresh dashboard'}</Button>
+          </div>
+          <div className="ol-metric-grid">
+            <Metric title="Condition change events" value={fmt(conditionDashboard?.summary?.total_changes)} note="Actual status-change events" icon={Activity} tone="blue"/>
+            <Metric title="Devices affected" value={fmt(conditionDashboard?.summary?.devices_affected)} note="Unique device serials" icon={Boxes} tone="violet"/>
+            <Metric title="Physical changes" value={fmt(conditionDashboard?.summary?.physical_changes)} note="Good / damaged transitions" icon={Wrench} tone="amber"/>
+            <Metric title="Functional changes" value={fmt(conditionDashboard?.summary?.functional_changes)} note="Working / not working transitions" icon={BadgeCheck} tone="red"/>
+          </div>
+          <div className="ol-two-col">
+            <Panel title="Week-by-week trend" subtitle="A single event can change physical condition, functional condition, or both.">
+              <div className="ol-weekly-list">{(conditionDashboard?.weekly || []).map((w) => <div className="ol-weekly-row" key={w.week_start}>
+                <div className="ol-weekly-meta"><strong>Week of {new Date(w.week_start).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</strong><span>{fmt(w.total_changes)} events</span></div>
+                <div className="ol-weekly-track"><span style={{ width: `${Math.max(4,(Number(w.total_changes||0)/maxWeeklyChanges)*100)}%` }}/></div>
+                <small>Physical {fmt(w.physical_changes)} · Functional {fmt(w.functional_changes)} · Devices {fmt(w.devices_affected)}</small>
+              </div>)}
+              {!(conditionDashboard?.weekly || []).length && <Empty title="No condition changes in this period" detail="A change is recorded when physical or functional condition changes from its previous value."/>}</div>
+            </Panel>
+            <Panel title="Devices with most changes" subtitle="Current position and change counts within the selected reporting window.">
+              <div className="ol-simple-table"><table><thead><tr><th>Asset serial</th><th>IMEI</th><th>Total</th><th>Physical</th><th>Functional</th><th>Current status</th></tr></thead><tbody>{(conditionDashboard?.devices || []).map((d) => <tr key={d.device_serial}><td className="ol-mono">{d.device_serial}</td><td className="ol-mono">{d.imei || '—'}</td><td><strong>{d.total_changes}</strong></td><td>{d.physical_changes}</td><td>{d.functional_changes}</td><td>{human(d.current_physical_condition)} / {human(d.current_functional_condition)}<small>{human(d.current_stock_state)}</small></td></tr>)}</tbody></table>{!(conditionDashboard?.devices || []).length && <Empty title="No device change records" detail="Affected devices will appear here when a condition changes."/>}</div>
+            </Panel>
+          </div>
+        </Panel>
+        <Panel title="Line-level condition change history" subtitle="Each condition transition includes previous and new state, date/time, remarks, actor and reference.">
+          <div className="ol-simple-table"><table><thead><tr><th>Date / time</th><th>Asset serial / IMEI</th><th>Change</th><th>Physical condition</th><th>Functional condition</th><th>Remarks</th><th>Changed by</th><th>Reference</th></tr></thead><tbody>{(conditionDashboard?.details || []).map((d) => <tr key={d.id}><td>{when(d.changed_at)}</td><td className="ol-mono">{d.device_serial}<small>{d.imei || '—'}</small></td><td><Pill tone="info">{human(d.change_kind)}</Pill></td><td>{human(d.previous_physical_condition)} → <strong>{human(d.physical_condition)}</strong></td><td>{human(d.previous_functional_condition)} → <strong>{human(d.functional_condition)}</strong></td><td className="ol-change-detail">{d.remarks || '—'}</td><td>{d.changed_by_name || (d.changed_by ? String(d.changed_by).slice(0,8) : 'System')}</td><td>{d.reference_type || '—'} {d.reference_id || ''}</td></tr>)}</tbody></table>{!(conditionDashboard?.details || []).length && <Empty title="No line-level status changes" detail="Change records will appear here with before/after condition and remarks."/>}</div>
+        </Panel>
+      </div>}
 
       {page === 'movement' && <Panel title="IMEI-level device movement ledger" subtitle="Chronological, append-only movement and condition history for each device.">
         <div className="ol-toolbar"><Search size={16}/><ScanInput value={search} onChange={setSearch} placeholder="Scan or search Serial / IMEI / event / reference"/><Button tone="secondary" onClick={async () => { const rows = await operationsApi.listDeviceMovements(site, search, 300); setMovementRows(Array.isArray(rows) ? rows : []); }} disabled={busy}>Search ledger</Button></div>
