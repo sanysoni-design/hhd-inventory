@@ -126,7 +126,10 @@ export async function setAccountPassword(password) {
     headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ password }),
   });
-  return parseResponse(response);
+  const updatedUser = await parseResponse(response);
+  const session = readSession();
+  if (session) saveSession({ ...session, user: updatedUser });
+  return updatedUser;
 }
 
 export async function getAccessToken(forceRefresh = false) {
