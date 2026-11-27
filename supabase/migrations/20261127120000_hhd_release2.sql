@@ -300,9 +300,9 @@ as $$
 declare
   v_site text;
   v_sites text[] := array(
-    select distinct trim(x)
-    from unnest(coalesce(p_site_codes, array[]::text[])) x
-    where trim(x) <> ''
+    select distinct trim(u.site_code)
+    from unnest(coalesce(p_site_codes, array[]::text[])) as u(site_code)
+    where trim(u.site_code) <> ''
   );
 begin
   if not public.hhd_has_permission('admin_users','update','*') then
@@ -625,12 +625,63 @@ begin
 end;
 $$;
 
+
+create or replace function public.hhd_list_device_movement_ledger(
+  p_site_code text,
+  p_search text default null,
+  p_limit integer default 200
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, auth, pg_temp
+as $
+declare
+  v_scope text;
+  v_rows jsonb;
+  v_query text := lower(trim(coalesce(p_search,'')));
+begin
+  v_scope := coalesce(
+    public.hhd_permission_scope('inventory','view',p_site_code),
+    public.hhd_permission_scope('admin_audit','view',p_site_code)
+  );
+  if v_scope is null then raise exception 'Forbidden: device movement history access denied'; end if;
+
+  select coalesce(jsonb_agg(to_jsonb(x) order by x.performed_at desc),'[]'::jsonb)
+  into v_rows
+  from (
+    select l.id,l.device_serial,l.imei_number,l.event_type,
+      l.from_department,l.to_department,l.from_holder_type,l.from_holder_id,
+      l.to_holder_type,l.to_holder_id,l.site_code,l.reference_type,l.reference_id,
+      l.physical_condition,l.functional_condition,l.notes,l.performed_by,
+      l.performed_at,l.metadata
+    from public.device_movement_ledger l
+    where l.site_code=p_site_code
+      and (v_scope <> 'own' or l.performed_by=auth.uid())
+      and (
+        v_query = ''
+        or lower(coalesce(l.device_serial,'')) like '%'||v_query||'%'
+        or lower(coalesce(l.imei_number,'')) like '%'||v_query||'%'
+        or lower(coalesce(l.event_type,'')) like '%'||v_query||'%'
+        or lower(coalesce(l.reference_id,'')) like '%'||v_query||'%'
+        or lower(coalesce(l.notes,'')) like '%'||v_query||'%'
+        or lower(coalesce(l.metadata::text,'')) like '%'||v_query||'%'
+      )
+    order by l.performed_at desc
+    limit greatest(1,least(coalesce(p_limit,200),500))
+  ) x;
+  return v_rows;
+end;
+$;
+
 grant execute on function public.hhd_list_allocatable_employees(text) to authenticated;
 grant execute on function public.hhd_admin_list_onroll_employees(text) to authenticated;
 grant execute on function public.hhd_admin_assign_role_sites(uuid,text,text[]) to authenticated;
 grant execute on function public.hhd_sto_create_dispatch(text,text,text[],text) to authenticated;
 grant execute on function public.hhd_sto_receive_device(uuid,text,text,text) to authenticated;
 grant execute on function public.hhd_sto_list(text,integer) to authenticated;
+grant execute on function public.hhd_list_device_movement_ledger(text,text,integer) to authenticated;
 
 commit;
 notify pgrst, 'reload schema';
