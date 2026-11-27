@@ -98,6 +98,26 @@ export async function consumeInviteLink() {
   return session ? { session, type: type || 'invite' } : null;
 }
 
+export async function requestPasswordReset(email) {
+  config();
+  const redirect = typeof window !== 'undefined'
+    ? `${window.location.origin}${window.location.pathname}?ops-live=1`
+    : undefined;
+  const suffix = redirect ? `?redirect_to=${encodeURIComponent(redirect)}` : '';
+  return authRequest(`recover${suffix}`, { email: email.trim().toLowerCase() });
+}
+
+export async function changeAccountPassword(currentPassword, newPassword) {
+  if (String(newPassword).length < 6 || String(newPassword).length > 72) {
+    throw new Error('Password must contain 6 to 72 characters.');
+  }
+  const session = readSession();
+  const email = session?.user?.email;
+  if (!email) throw new Error('Your signed-in email could not be identified. Sign out and sign in again.');
+  await signInWithEmail(email, currentPassword);
+  return setAccountPassword(newPassword);
+}
+
 export async function setAccountPassword(password) {
   config();
   const token = await getAccessToken();
@@ -187,6 +207,7 @@ export const operationsApi = {
   getHrSyncRuns: (limit = 20) => rpc('hhd_get_hr_sync_runs', { p_limit: limit }),
   listMyDevices: () => rpc('hhd_list_my_devices'),
   listEmployees: (siteCode) => rpc('hhd_admin_list_onroll_employees', { p_site_code: siteCode }),
+  listAllocatableEmployees: (siteCode) => rpc('hhd_list_allocatable_employees', { p_site_code: siteCode }),
   saveEmployee: (employee) => rpc('hhd_admin_upsert_onroll_employee', {
     p_employee_id: employee.employee_id,
     p_employee_name: employee.employee_name,
@@ -199,6 +220,16 @@ export const operationsApi = {
   listRolesAndPermissions: () => rpc('hhd_admin_list_roles_permissions'),
   listUsers: (siteCode = '*') => rpc('hhd_admin_list_users', { p_site_code: siteCode }),
   listAuditEvents: (siteCode = '*', limit = 100) => rpc('hhd_admin_list_audit_events', { p_site_code: siteCode, p_limit: limit }),
+  listDeviceMovements: (siteCode, search = '', limit = 200) => rpc('hhd_list_device_movement_ledger', {
+    p_site_code: siteCode, p_search: search || null, p_limit: limit,
+  }),
+  createAndDispatchSto: (fromSite, toSite, scans, notes) => rpc('hhd_sto_create_dispatch', {
+    p_from_site_code: fromSite, p_to_site_code: toSite, p_scans: scans, p_notes: notes || null,
+  }),
+  receiveStoDevice: (stoId, scanValue, department, notes) => rpc('hhd_sto_receive_device', {
+    p_sto_id: stoId, p_scan_value: scanValue, p_destination_department: department, p_notes: notes || null,
+  }),
+  listSto: (siteCode, limit = 100) => rpc('hhd_sto_list', { p_site_code: siteCode, p_limit: limit }),
   createRole: (role) => rpc('hhd_admin_create_role', {
     p_role_code: role.role_code,
     p_role_name: role.role_name,
