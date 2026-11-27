@@ -369,7 +369,9 @@ export default function HotoWizard({ site, onComplete }) {
       }
       setSuccess({ ...result, flow, timestamp: localDateTime(), physical_condition: physical, functional_condition: functional });
       setScreen('success');
-      if (onComplete) await onComplete();
+      if (onComplete) {
+        try { await onComplete(); } catch { /* The HOTO transaction is already committed; a refresh failure must not report it as failed. */ }
+      }
     } catch (error) {
       fail(error.message || 'HOTO transaction failed.');
     } finally {
