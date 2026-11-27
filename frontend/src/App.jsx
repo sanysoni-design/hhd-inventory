@@ -156,14 +156,15 @@ function LegacyApp() {
   return <Main url={url} setUrl={setUrl} auth={auth} logout={logout} />;
 }
 
-// Isolated Operations UI preview. Existing production routes remain unchanged.
+// Production defaults to the current Operations workspace.
+// Keep the previous inventory interface available explicitly for rollback via ?legacy=1.
 export default function App() {
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
-  const live = params.get('ops-live') === '1';
+  const legacy = params.get('legacy') === '1';
   const preview = params.get('ops-ui') === 'preview';
-  if (live) return <OperationsLiveWorkspace />;
+  if (legacy) return <LegacyApp />;
   if (preview) return <OperationsWorkspace />;
-  return <LegacyApp />;
+  return <OperationsLiveWorkspace />;
 }
 
 // No server URL field here: only admins can see/change it (Config tab).
