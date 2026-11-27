@@ -228,8 +228,11 @@ export default function OperationsLiveWorkspace() {
       setWorkspace(ws);
       const alloc = await safe(() => operationsApi.listAllocations(siteCode), []);
       setAllocations(Array.isArray(alloc) ? alloc : []);
-      if (can('admin_employees', 'view') || can('distribution', 'view')) {
+      if (can('admin_employees', 'view')) {
         const emp = await safe(() => operationsApi.listEmployees(siteCode), []);
+        setEmployees(Array.isArray(emp) ? emp : []);
+      } else if (can('distribution', 'view')) {
+        const emp = await safe(() => operationsApi.listAllocatableEmployees(siteCode), []);
         setEmployees(Array.isArray(emp) ? emp : []);
       } else setEmployees([]);
       if (can('hoto', 'view') || can('hoto', 'create')) {
@@ -260,6 +263,14 @@ export default function OperationsLiveWorkspace() {
         const audit = await safe(() => operationsApi.listAuditEvents(isAdmin ? '*' : siteCode, 150), []);
         setAuditRows(Array.isArray(audit) ? audit : []);
       } else setAuditRows([]);
+      if (can('inventory', 'view')) {
+        const movements = await safe(() => operationsApi.listDeviceMovements(siteCode, '', 200), []);
+        setMovementRows(Array.isArray(movements) ? movements : []);
+      } else setMovementRows([]);
+      if (can('sto', 'view')) {
+        const sto = await safe(() => operationsApi.listSto(siteCode, 100), []);
+        setStoRows(Array.isArray(sto) ? sto : []);
+      } else setStoRows([]);
     } catch (e) {
       setError(e.message || 'Unable to load site workspace.');
     } finally {
@@ -512,12 +523,13 @@ export default function OperationsLiveWorkspace() {
     if (can('distribution', 'view') || can('distribution', 'create') || can('employee_collection', 'view')) items.push({ id: 'allocations', label: 'Quantity allocations', icon: ListChecks });
     if (can('employee_collection', 'view') || can('employee_collection', 'scan_assign')) items.push({ id: 'my-devices', label: 'My devices & collection', icon: Smartphone });
     if (can('hoto', 'view') || can('hoto', 'create')) items.push({ id: 'hoto', label: 'Shift HOTO', icon: ArrowLeftRight });
-    if (can('admin_employees', 'view') || can('distribution', 'view')) items.push({ id: 'employees', label: 'On-roll employees', icon: Users });
+    if (can('admin_employees', 'view')) items.push({ id: 'employees', label: 'On-roll employees', icon: Users });
     if (can('admin_users', 'view') || can('admin_users', 'create')) items.push({ id: 'users', label: 'Users & IDs', icon: UserRoundPlus });
     if (can('admin_roles', 'view') || can('admin_roles', 'create')) items.push({ id: 'roles', label: 'Roles & permissions', icon: ShieldCheck });
     if (can('offroll_workers', 'view') || can('offroll_workers', 'sync')) items.push({ id: 'hr', label: 'HR TL/GC master', icon: FileClock });
     if (can('inventory', 'reconcile')) items.push({ id: 'reconcile', label: 'Opening stock reconciliation', icon: Wrench });
-    if (can('sto', 'view')) items.push({ id: 'sto', label: 'STO workflow', icon: Package });
+    if (can('sto', 'view') || can('sto', 'create') || can('sto', 'dispatch') || can('sto', 'receive')) items.push({ id: 'sto', label: 'STO workflow', icon: Package });
+    if (can('inventory', 'view')) items.push({ id: 'movement', label: 'IMEI movement ledger', icon: Activity });
     return items;
   }, [can]);
 
