@@ -441,7 +441,7 @@ export default function OperationsLiveWorkspace() {
       if (userForm.password.length < 6 || userForm.password.length > 72) throw new Error('Initial password must contain 6 to 72 characters.');
       if (userForm.password !== creatingUserPasswordConfirm) throw new Error('Initial password fields do not match.');
       const siteCodes = userForm.site_codes.length ? userForm.site_codes : [userForm.site_code || site];
-      const result = await operationsApi.createUser({ ...userForm, site_codes: siteCodes, site_code: siteCodes[0] });
+      await operationsApi.createUser({ ...userForm, site_codes: siteCodes, site_code: siteCodes[0] });
       flash(`Account created for ${userForm.full_name}. No email was sent.`);
       setUserForm((x) => ({ ...x, email: '', login_id: '', employee_id: '', full_name: '', process: '', password: '', site_codes: [] }));
       setCreatingUserPasswordConfirm('');
@@ -722,7 +722,7 @@ export default function OperationsLiveWorkspace() {
         </Panel>
       </>}
 
-      {page === 'employees' && <Panel title="On-roll employee master" subtitle="Only active employees with an individual application login can receive allocations.">
+      {page === 'employees' && can('admin_employees', 'view') && <Panel title="On-roll employee master" subtitle="Only active employees with an individual application login can receive allocations.">
         {can('admin_employees', 'create') && <form className="ol-form-grid ol-form-compact" onSubmit={createEmployee}>
           <Field label="Employee ID"><input value={employeeForm.employee_id} onChange={(e) => setEmployeeForm({ ...employeeForm, employee_id: e.target.value.toUpperCase() })} required/></Field>
           <Field label="Employee name"><input value={employeeForm.employee_name} onChange={(e) => setEmployeeForm({ ...employeeForm, employee_name: e.target.value })} required/></Field>
@@ -735,7 +735,7 @@ export default function OperationsLiveWorkspace() {
         <div className="ol-simple-table"><table><thead><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Process</th><th>Site</th><th>Status</th><th>Login linked</th></tr></thead><tbody>{employees.map((e) => <tr key={e.employee_id}><td className="ol-mono">{e.employee_id}</td><td>{e.employee_name}</td><td>{e.designation}</td><td>{e.process || '—'}</td><td>{e.site_code}</td><td><Pill tone={e.employment_status === 'active' ? 'success' : 'warning'}>{human(e.employment_status)}</Pill></td><td>{e.linked_user_id ? 'Yes' : 'No'}</td></tr>)}</tbody></table>{!employees.length && <Empty title="No employee records" detail="Add or provision an on-roll employee account to start allocation."/>}</div>
       </Panel>}
 
-      {page === 'users' && <>
+      {page === 'users' && (can('admin_users', 'view') || can('admin_users', 'create') || can('admin_users', 'update')) && <>
         {can('admin_users', 'create') && <Panel title="Create application login ID" subtitle="Only on-roll application users receive individual logins. TL/GC are not provisioned here.">
           <form className="ol-form-grid" onSubmit={createUser}>
             <Field label="Full name"><input value={userForm.full_name} onChange={(e) => setUserForm({ ...userForm, full_name: e.target.value })} required/></Field>
@@ -743,7 +743,7 @@ export default function OperationsLiveWorkspace() {
             <Field label="Login ID"><input value={userForm.login_id} onChange={(e) => setUserForm({ ...userForm, login_id: e.target.value })} required/></Field>
             <Field label="Employee ID"><input value={userForm.employee_id} onChange={(e) => setUserForm({ ...userForm, employee_id: e.target.value.toUpperCase() })} placeholder="Required for Operations roles"/></Field>
             <Field label="Role"><select value={userForm.role_code} onChange={(e) => setUserForm({ ...userForm, role_code: e.target.value, site_codes: [], site_code: e.target.value === 'admin' ? '*' : site })}>{roleData.roles.map((r) => <option key={r.role_code} value={r.role_code}>{r.role_name}</option>)}</select></Field>
-            <Field label="Assigned site(s)" hint={userForm.role_code === 'assigned_employee' ? 'Custodian accounts use one On-roll Employee Master site.' : 'Select one or more sites. All sites is reserved for Admin.'}><select multiple={userForm.role_code !== 'assigned_employee'} size={Math.min(6, Math.max(3, siteOptions.length))} value={userForm.site_codes.length ? userForm.site_codes : [userForm.site_code || site]} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setUserForm({ ...userForm, site_codes: selected, site_code: selected[0] || '' }); }} required>
+            <Field label="Assigned site(s)" hint={userForm.role_code === 'assigned_employee' ? 'Custodian accounts use one On-roll Employee Master site.' : 'Select one or more sites. All sites is reserved for Admin.'}><select multiple={userForm.role_code !== 'assigned_employee'} size={Math.min(6, Math.max(3, siteOptions.length))} value={userForm.role_code === 'assigned_employee' ? (userForm.site_codes[0] || userForm.site_code || site) : (userForm.site_codes.length ? userForm.site_codes : [userForm.site_code || site])} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setUserForm({ ...userForm, site_codes: selected, site_code: selected[0] || '' }); }} required>
               {(userForm.role_code === 'admin' ? ['*'] : siteOptions).map((s) => <option key={s} value={s}>{s === '*' ? 'All sites' : s}</option>)}
             </select></Field>
             <Field label="Designation"><input value={userForm.designation} onChange={(e) => setUserForm({ ...userForm, designation: e.target.value })} placeholder="Lead / Sr. Lead / AM"/></Field>
@@ -773,7 +773,7 @@ export default function OperationsLiveWorkspace() {
         </Panel>
       </>}
 
-      {page === 'roles' && <>
+      {page === 'roles' && can('admin_roles', 'view') && <>
         {can('admin_roles', 'create') && <Panel title="Create role" subtitle="Custom roles combine the available permissions and data scopes.">
           <form className="ol-form-grid" onSubmit={createRole}>
             <Field label="Role name"><input value={roleForm.role_name} onChange={(e) => setRoleForm({ ...roleForm, role_name: e.target.value, role_code: e.target.value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') })} required/></Field>
@@ -787,7 +787,7 @@ export default function OperationsLiveWorkspace() {
           <form className="ol-form-grid ol-form-compact" onSubmit={assignAdditionalRole}>
             <Field label="Application user"><select value={roleAssignmentForm.user_id} onChange={(e) => setRoleAssignmentForm({ ...roleAssignmentForm, user_id: e.target.value })} required><option value="">Select account</option>{users.filter((u) => u.account_status !== 'deactivated').map((u) => <option key={u.user_id} value={u.user_id}>{u.full_name} · {u.login_id}</option>)}</select></Field>
             <Field label="Role"><select value={roleAssignmentForm.role_code} onChange={(e) => setRoleAssignmentForm({ ...roleAssignmentForm, role_code: e.target.value, site_codes: [], site_code: e.target.value === 'admin' ? '*' : site })}>{roleData.roles.map((r) => <option key={r.role_code} value={r.role_code}>{r.role_name}</option>)}</select></Field>
-            <Field label="Assigned site(s)" hint={roleAssignmentForm.role_code === 'assigned_employee' ? 'Custodian is tied to one On-roll Employee Master site.' : 'Select one or more sites. All sites is only available for Admin.'}><select multiple={roleAssignmentForm.role_code !== 'assigned_employee'} size={Math.min(6, Math.max(3, siteOptions.length))} value={roleAssignmentForm.site_codes.length ? roleAssignmentForm.site_codes : [roleAssignmentForm.site_code || site]} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setRoleAssignmentForm({ ...roleAssignmentForm, site_codes: selected, site_code: selected[0] || '' }); }} required>{(isAdmin && roleAssignmentForm.role_code === 'admin' ? ['*'] : siteOptions).map((s) => <option key={s} value={s}>{s === '*' ? 'All sites' : s}</option>)}</select></Field>
+            <Field label="Assigned site(s)" hint={roleAssignmentForm.role_code === 'assigned_employee' ? 'Custodian is tied to one On-roll Employee Master site.' : 'Select one or more sites. All sites is only available for Admin.'}><select multiple={roleAssignmentForm.role_code !== 'assigned_employee'} size={Math.min(6, Math.max(3, siteOptions.length))} value={roleAssignmentForm.role_code === 'assigned_employee' ? (roleAssignmentForm.site_codes[0] || roleAssignmentForm.site_code || site) : (roleAssignmentForm.site_codes.length ? roleAssignmentForm.site_codes : [roleAssignmentForm.site_code || site])} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setRoleAssignmentForm({ ...roleAssignmentForm, site_codes: selected, site_code: selected[0] || '' }); }} required>{(isAdmin && roleAssignmentForm.role_code === 'admin' ? ['*'] : siteOptions).map((s) => <option key={s} value={s}>{s === '*' ? 'All sites' : s}</option>)}</select></Field>
             <div className="ol-form-actions"><Button type="submit" disabled={busy || !roleAssignmentForm.user_id}>Assign role to selected sites</Button></div>
           </form>
         </Panel>}
