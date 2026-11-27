@@ -317,8 +317,8 @@ export const operationsApi = {
     p_shift_date: row.shift_date || new Date().toISOString().slice(0, 10),
     p_notes: row.notes || null,
   }),
-  validateHotoWorker: (employeeId, siteCode) => rpc('hhd_hoto_validate_worker', {
-    p_employee_id: employeeId, p_site_code: siteCode,
+  validateHotoWorker: (employeeId, siteCode, action = 'handover') => rpc('hhd_hoto_validate_worker', {
+    p_employee_id: employeeId, p_site_code: siteCode, p_action: action,
   }),
   resolveHotoDevice: (scanValue, siteCode, action) => rpc('hhd_hoto_resolve_device', {
     p_scan_value: scanValue, p_site_code: siteCode, p_action: action,
