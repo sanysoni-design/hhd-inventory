@@ -249,15 +249,32 @@ export const operationsApi = {
     p_user_id: userId, p_role_code: roleCode, p_site_code: siteCode, p_reason: reason,
   }),
   deactivateUser: (userId, reason) => rpc('hhd_admin_deactivate_user', { p_user_id: userId, p_reason: reason }),
-  createUser: (user) => invoke('admin-create-user', {
+  createUser: (user) => invoke('admin-manage-user', {
+    action: 'create',
     email: user.email,
+    password: user.password,
     login_id: user.login_id,
     employee_id: user.employee_id || null,
     full_name: user.full_name,
     role_code: user.role_code,
     site_code: user.site_code,
+    site_codes: user.site_codes || [user.site_code],
     designation: user.designation || null,
     process: user.process || null,
+  }),
+  updateUser: (user) => invoke('admin-manage-user', {
+    action: 'update',
+    user_id: user.user_id,
+    email: user.email,
+    password: user.password || '',
+    login_id: user.login_id,
+    employee_id: user.employee_id || null,
+    full_name: user.full_name,
+    designation: user.designation || null,
+    process: user.process || null,
+  }),
+  resetUserPassword: (userId, password) => invoke('admin-manage-user', {
+    action: 'reset_password', user_id: userId, password,
   }),
   createOrAdjustAllocation: (allocation) => rpc('hhd_create_or_adjust_allocation', {
     p_site_code: allocation.site_code,
