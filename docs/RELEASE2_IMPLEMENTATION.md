@@ -5,8 +5,8 @@
 Release 2 was developed on `release-2-implementation`, based on `feature/operations-live-phase1`, then fast-forwarded onto `feature/operations-live-phase1`.
 
 - `feature/operations-live-phase1` now contains the Release 2 implementation.
-- `feature/hhd-test-accounts` remains the temporary test-account deployment branch and was not modified.
-- The test-account branch is intentionally separate and is now 33 commits behind the implementation branch, with its own one test-account commit.
+- `feature/hhd-test-accounts` remains the temporary test-account deployment branch and was not modified by the Release 2 work.
+- The test-account branch retains its separate test-account changes and has not been merged into the implementation branch.
 - `main` is unchanged.
 - The Release 2 migration and Edge Function have not been deployed to the live Supabase project.
 
