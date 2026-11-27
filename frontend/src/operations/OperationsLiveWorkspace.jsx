@@ -123,7 +123,6 @@ export default function OperationsLiveWorkspace() {
   const [allocations, setAllocations] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [offrollWorkers, setOffrollWorkers] = useState([]);
-  const [myDevices, setMyDevices] = useState([]);
   const [custodianAssignments, setCustodianAssignments] = useState([]);
   const [conditionDashboard, setConditionDashboard] = useState(null);
   const [conditionLoading, setConditionLoading] = useState(false);
@@ -245,10 +244,6 @@ export default function OperationsLiveWorkspace() {
         const workers = await safe(() => operationsApi.listOffrollWorkers(siteCode), []);
         setOffrollWorkers(Array.isArray(workers) ? workers : []);
       } else setOffrollWorkers([]);
-      if (can('employee_collection', 'view')) {
-        const my = await safe(() => operationsApi.listMyDevices(), []);
-        setMyDevices(Array.isArray(my) ? my : []);
-      } else setMyDevices([]);
       if (can('distribution', 'view') || can('employee_collection', 'view')) {
         const assigned = await safe(() => operationsApi.listCustodianDeviceAssignments(siteCode), []);
         setCustodianAssignments(Array.isArray(assigned) ? assigned : []);
