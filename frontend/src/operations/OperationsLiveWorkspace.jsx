@@ -124,7 +124,6 @@ export default function OperationsLiveWorkspace() {
   const [employees, setEmployees] = useState([]);
   const [offrollWorkers, setOffrollWorkers] = useState([]);
   const [myDevices, setMyDevices] = useState([]);
-  const [hotoRows, setHotoRows] = useState([]);
   const [users, setUsers] = useState([]);
   const [roleData, setRoleData] = useState({ roles: [], permissions: [], role_permissions: [] });
   const [hrRuns, setHrRuns] = useState([]);
@@ -152,8 +151,6 @@ export default function OperationsLiveWorkspace() {
   const [search, setSearch] = useState('');
   const [allocationForm, setAllocationForm] = useState({ employee_id: '', process: '', quantity: 1, reason: '' });
   const [scanForm, setScanForm] = useState({ allocation_id: '', scan_value: '' });
-  const [hotoForm, setHotoForm] = useState({ serial: '', worker_id: '', shift: 'A', date: new Date().toISOString().slice(0, 10), type: 'handover', physical: 'good', functional: 'working', notes: '' });
-  const [hotoReturnForm, setHotoReturnForm] = useState({ serial: '', physical: 'good', functional: 'working', shift: 'A', date: new Date().toISOString().slice(0, 10), notes: '' });
   const [userForm, setUserForm] = useState({ email: '', login_id: '', employee_id: '', full_name: '', role_code: 'assigned_employee', site_code: '', site_codes: [], designation: 'Lead', process: '', password: '' });
   const [roleForm, setRoleForm] = useState({ role_name: '', role_code: '', description: '', scope_type: 'assigned_sites' });
   const [selectedRole, setSelectedRole] = useState('site_lead');
@@ -239,14 +236,10 @@ export default function OperationsLiveWorkspace() {
         const emp = await safe(() => operationsApi.listAllocatableEmployees(siteCode), []);
         setEmployees(Array.isArray(emp) ? emp : []);
       } else setEmployees([]);
-      if (can('hoto', 'view') || can('hoto', 'create')) {
-        const [workers, hoto] = await Promise.all([
-          safe(() => operationsApi.listOffrollWorkers(siteCode), []),
-          safe(() => operationsApi.listHotoTransactions(siteCode, 150), []),
-        ]);
+      if (can('hoto', 'view') || can('hoto', 'create') || can('hoto', 'acknowledge') || can('hoto', 'swap')) {
+        const workers = await safe(() => operationsApi.listOffrollWorkers(siteCode), []);
         setOffrollWorkers(Array.isArray(workers) ? workers : []);
-        setHotoRows(Array.isArray(hoto) ? hoto : []);
-      } else { setOffrollWorkers([]); setHotoRows([]); }
+      } else setOffrollWorkers([]);
       if (can('employee_collection', 'view')) {
         const my = await safe(() => operationsApi.listMyDevices(), []);
         setMyDevices(Array.isArray(my) ? my : []);
@@ -407,34 +400,6 @@ export default function OperationsLiveWorkspace() {
       flash(`${serial} returned. New stock state: ${result.stock_state}.`);
       await loadSiteData(site);
     } catch (e) { flash(e.message || 'Device return failed.', 'error'); }
-  };
-
-  const submitHoto = async (e) => {
-    e.preventDefault();
-    try {
-      const result = await operationsApi.recordHotoTransfer({
-        device_serial: hotoForm.serial, offroll_employee_id: hotoForm.worker_id,
-        shift_code: hotoForm.shift, shift_date: hotoForm.date, transaction_type: hotoForm.type, notes: hotoForm.notes,
-        physical_condition: hotoForm.physical, functional_condition: hotoForm.functional,
-      });
-      flash(`${result.serial} moved to ${result.worker_name} (${result.worker_type}).`);
-      setHotoForm((x) => ({ ...x, serial: '', worker_id: '', notes: '' }));
-      await loadSiteData(site);
-    } catch (e2) { flash(e2.message || 'HOTO transaction failed.', 'error'); }
-  };
-
-  const submitHotoReturn = async (e) => {
-    e.preventDefault();
-    try {
-      const result = await operationsApi.returnHotoToPrimary({
-        device_serial: hotoReturnForm.serial, physical_condition: hotoReturnForm.physical,
-        functional_condition: hotoReturnForm.functional, shift_code: hotoReturnForm.shift,
-        shift_date: hotoReturnForm.date, notes: hotoReturnForm.notes,
-      });
-      flash(`${result.serial} returned to primary employee ${result.primary_employee_id}.`);
-      setHotoReturnForm((x) => ({ ...x, serial: '', notes: '' }));
-      await loadSiteData(site);
-    } catch (e2) { flash(e2.message || 'HOTO return failed.', 'error'); }
   };
 
   const createUser = async (e) => {
