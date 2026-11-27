@@ -3,3 +3,6 @@ verify_jwt = true
 
 [functions.hr-sync-workers]
 verify_jwt = false
+
+[functions.admin-manage-user]
+verify_jwt = true
