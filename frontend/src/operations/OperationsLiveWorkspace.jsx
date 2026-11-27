@@ -208,7 +208,7 @@ export default function OperationsLiveWorkspace() {
           setSession(getStoredSession());
         }
       } catch (e) {
-        if (alive) setError(e.message || 'Invitation verification failed.');
+        if (alive) setError(e.message || 'Password link verification failed.');
       } finally {
         if (alive) setInitializing(false);
       }
@@ -304,7 +304,7 @@ export default function OperationsLiveWorkspace() {
       setInvitePassword(''); setInvitePasswordConfirm('');
       await loadContext();
       setNotice('Password set successfully. You can now sign in.');
-    } catch (e2) { setError(e2.message || 'Unable to complete invitation.'); }
+    } catch (e2) { setError(e2.message || 'Unable to set password.'); }
     finally { setBusy(false); }
   };
 
@@ -446,7 +446,7 @@ export default function OperationsLiveWorkspace() {
       setUserForm((x) => ({ ...x, email: '', login_id: '', employee_id: '', full_name: '', process: '', password: '', site_codes: [] }));
       setCreatingUserPasswordConfirm('');
       await loadSiteData(site);
-    } catch (e2) { flash(e2.message || 'User invitation failed.', 'error'); }
+    } catch (e2) { flash(e2.message || 'User account creation failed.', 'error'); }
   };
 
   const assignAdditionalRole = async (e) => {
@@ -586,7 +586,7 @@ export default function OperationsLiveWorkspace() {
       <Field label="New password"><input type="password" value={invitePassword} onChange={(e) => setInvitePassword(e.target.value)} minLength={6} maxLength={72} autoComplete="new-password" required/></Field>
       <Field label="Confirm password"><input type="password" value={invitePasswordConfirm} onChange={(e) => setInvitePasswordConfirm(e.target.value)} minLength={6} maxLength={72} autoComplete="new-password" required/></Field>
       {error && <div className="ol-alert ol-alert-error">{error}</div>}
-      <Button type="submit" disabled={busy || !invitePassword || !invitePasswordConfirm}>{busy ? 'Saving…' : 'Activate account'}</Button>
+      <Button type="submit" disabled={busy || !invitePassword || !invitePasswordConfirm}>{busy ? 'Saving…' : 'Set password and continue'}</Button>
     </form></div>
   );
 
@@ -743,7 +743,7 @@ export default function OperationsLiveWorkspace() {
             <Field label="Login ID"><input value={userForm.login_id} onChange={(e) => setUserForm({ ...userForm, login_id: e.target.value })} required/></Field>
             <Field label="Employee ID"><input value={userForm.employee_id} onChange={(e) => setUserForm({ ...userForm, employee_id: e.target.value.toUpperCase() })} placeholder="Required for Operations roles"/></Field>
             <Field label="Role"><select value={userForm.role_code} onChange={(e) => setUserForm({ ...userForm, role_code: e.target.value, site_codes: [], site_code: e.target.value === 'admin' ? '*' : site })}>{roleData.roles.map((r) => <option key={r.role_code} value={r.role_code}>{r.role_name}</option>)}</select></Field>
-            <Field label="Assigned site(s)" hint="Use Ctrl / Cmd to select multiple sites. All sites is reserved for Admin."><select multiple size={Math.min(6, Math.max(3, siteOptions.length))} value={userForm.site_codes.length ? userForm.site_codes : [userForm.site_code || site]} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setUserForm({ ...userForm, site_codes: selected, site_code: selected[0] || '' }); }} required>
+            <Field label="Assigned site(s)" hint={userForm.role_code === 'assigned_employee' ? 'Custodian accounts use one On-roll Employee Master site.' : 'Select one or more sites. All sites is reserved for Admin.'}><select multiple={userForm.role_code !== 'assigned_employee'} size={Math.min(6, Math.max(3, siteOptions.length))} value={userForm.site_codes.length ? userForm.site_codes : [userForm.site_code || site]} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setUserForm({ ...userForm, site_codes: selected, site_code: selected[0] || '' }); }} required>
               {(userForm.role_code === 'admin' ? ['*'] : siteOptions).map((s) => <option key={s} value={s}>{s === '*' ? 'All sites' : s}</option>)}
             </select></Field>
             <Field label="Designation"><input value={userForm.designation} onChange={(e) => setUserForm({ ...userForm, designation: e.target.value })} placeholder="Lead / Sr. Lead / AM"/></Field>
@@ -787,7 +787,7 @@ export default function OperationsLiveWorkspace() {
           <form className="ol-form-grid ol-form-compact" onSubmit={assignAdditionalRole}>
             <Field label="Application user"><select value={roleAssignmentForm.user_id} onChange={(e) => setRoleAssignmentForm({ ...roleAssignmentForm, user_id: e.target.value })} required><option value="">Select account</option>{users.filter((u) => u.account_status !== 'deactivated').map((u) => <option key={u.user_id} value={u.user_id}>{u.full_name} · {u.login_id}</option>)}</select></Field>
             <Field label="Role"><select value={roleAssignmentForm.role_code} onChange={(e) => setRoleAssignmentForm({ ...roleAssignmentForm, role_code: e.target.value, site_codes: [], site_code: e.target.value === 'admin' ? '*' : site })}>{roleData.roles.map((r) => <option key={r.role_code} value={r.role_code}>{r.role_name}</option>)}</select></Field>
-            <Field label="Assigned site(s)" hint="Select one or more sites. All sites is only available for Admin."><select multiple size={Math.min(6, Math.max(3, siteOptions.length))} value={roleAssignmentForm.site_codes.length ? roleAssignmentForm.site_codes : [roleAssignmentForm.site_code || site]} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setRoleAssignmentForm({ ...roleAssignmentForm, site_codes: selected, site_code: selected[0] || '' }); }} required>{(isAdmin && roleAssignmentForm.role_code === 'admin' ? ['*'] : siteOptions).map((s) => <option key={s} value={s}>{s === '*' ? 'All sites' : s}</option>)}</select></Field>
+            <Field label="Assigned site(s)" hint={roleAssignmentForm.role_code === 'assigned_employee' ? 'Custodian is tied to one On-roll Employee Master site.' : 'Select one or more sites. All sites is only available for Admin.'}><select multiple={roleAssignmentForm.role_code !== 'assigned_employee'} size={Math.min(6, Math.max(3, siteOptions.length))} value={roleAssignmentForm.site_codes.length ? roleAssignmentForm.site_codes : [roleAssignmentForm.site_code || site]} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setRoleAssignmentForm({ ...roleAssignmentForm, site_codes: selected, site_code: selected[0] || '' }); }} required>{(isAdmin && roleAssignmentForm.role_code === 'admin' ? ['*'] : siteOptions).map((s) => <option key={s} value={s}>{s === '*' ? 'All sites' : s}</option>)}</select></Field>
             <div className="ol-form-actions"><Button type="submit" disabled={busy || !roleAssignmentForm.user_id}>Assign role to selected sites</Button></div>
           </form>
         </Panel>}
@@ -861,7 +861,7 @@ export default function OperationsLiveWorkspace() {
 
       {page === 'movement' && <Panel title="IMEI-level device movement ledger" subtitle="Chronological, append-only movement and condition history for each device.">
         <div className="ol-toolbar"><Search size={16}/><ScanInput value={search} onChange={setSearch} placeholder="Scan or search Serial / IMEI / event / reference"/><Button tone="secondary" onClick={async () => { const rows = await operationsApi.listDeviceMovements(site, search, 300); setMovementRows(Array.isArray(rows) ? rows : []); }} disabled={busy}>Search ledger</Button></div>
-        <div className="ol-simple-table"><table><thead><tr><th>Date/time</th><th>Asset Serial</th><th>IMEI</th><th>Event</th><th>From</th><th>To</th><th>Condition</th><th>Reference</th><th>Performed by</th></tr></thead><tbody>{movementRows.filter((m) => `${m.device_serial} ${m.imei_number} ${m.event_type} ${m.reference_id} ${m.notes}`.toLowerCase().includes(search.toLowerCase())).map((m) => <tr key={m.id}><td>{when(m.performed_at)}</td><td className="ol-mono">{m.device_serial}</td><td className="ol-mono">{m.imei_number || '—'}</td><td><Pill tone="info">{human(m.event_type)}</Pill></td><td>{m.from_department || m.from_holder_id || '—'}</td><td>{m.to_department || m.to_holder_id || '—'}</td><td>{human(m.physical_condition)} / {human(m.functional_condition)}</td><td>{m.reference_type || '—'} {m.reference_id || ''}</td><td className="ol-mono">{String(m.performed_by || '').slice(0, 8) || 'System'}</td></tr>)}</tbody></table>{!movementRows.length && <Empty title="No movement history" detail="Device movements will appear after reconciliation, allocation, return, HOTO or STO transactions."/>}</div>
+        <div className="ol-simple-table"><table><thead><tr><th>Date/time</th><th>Asset Serial</th><th>IMEI</th><th>Event</th><th>From</th><th>To</th><th>Condition</th><th>Change details</th><th>Reference</th><th>Performed by</th></tr></thead><tbody>{movementRows.filter((m) => `${m.device_serial} ${m.imei_number} ${m.event_type} ${m.reference_id} ${m.notes}`.toLowerCase().includes(search.toLowerCase())).map((m) => <tr key={m.id}><td>{when(m.performed_at)}</td><td className="ol-mono">{m.device_serial}</td><td className="ol-mono">{m.imei_number || '—'}</td><td><Pill tone="info">{human(m.event_type)}</Pill></td><td>{m.from_department || m.from_holder_id || '—'}</td><td>{m.to_department || m.to_holder_id || '—'}</td><td>{human(m.physical_condition)} / {human(m.functional_condition)}</td><td className="ol-change-detail">{Object.entries(m.metadata || {}).map(([key, value]) => `${human(key)}: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`).join(' · ') || m.notes || '—'}</td><td>{m.reference_type || '—'} {m.reference_id || ''}</td><td>{m.performed_by_name || (m.performed_by ? String(m.performed_by).slice(0, 8) : 'System')}</td></tr>)}</tbody></table>{!movementRows.length && <Empty title="No movement history" detail="Device movements will appear after reconciliation, allocation, return, HOTO or STO transactions."/>}</div>
       </Panel>}
 
       <footer className="ol-footer"><span>HHD Control · Release 2</span><span>Backend authorization active · {site}</span></footer>
