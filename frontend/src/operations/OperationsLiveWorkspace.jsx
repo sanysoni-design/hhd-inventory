@@ -287,9 +287,11 @@ export default function OperationsLiveWorkspace() {
   const loadConditionDashboard = useCallback(async () => {
     if (!context || !site || !can('inventory', 'condition_history')) return;
     setConditionLoading(true);
-    const toDate = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const localDate = (value) => new Date(value.getTime() - value.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const toDate = localDate(now);
     const days = Math.max(7, Number(conditionRange) || 56);
-    const fromDate = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
+    const fromDate = localDate(new Date(now.getTime() - (days - 1) * 86400000));
     try {
       const result = await operationsApi.getDeviceConditionDashboard(site, fromDate, toDate, conditionSearch, 500);
       setConditionDashboard(result || null);
@@ -717,7 +719,7 @@ export default function OperationsLiveWorkspace() {
       </>}
 
       {page === 'my-devices' && <Panel title="My virtual custodian responsibilities" subtitle={`Signed in as ${profile?.full_name} · You are accountable for the HHDs mapped to your Employee ID. Physical custody and distribution remain with the Asset Manager / Operations.`}>
-        <div className="ol-simple-table"><table><thead><tr><th>Asset serial</th><th>IMEI</th><th>Device</th><th>Physical owner</th><th>Current shift holder</th><th>Stock state</th><th>Condition</th><th>Mapped on</th></tr></thead><tbody>{myDevices.map((d) => <tr key={d.assignment_id}><td className="ol-mono">{d.serial}</td><td className="ol-mono">{d.imei || '—'}</td><td>{d.make} {d.model}</td><td>Operations</td><td>{d.current_holder_type === 'offroll' ? <Pill tone="violet">TL/GC: {d.current_holder_employee_id}</Pill> : 'Operations Inventory'}</td><td><Pill tone={d.stock_state === 'available' ? 'success' : d.stock_state === 'assigned' ? 'info' : 'warning'}>{human(d.stock_state)}</Pill></td><td>{human(d.physical_condition)} / {human(d.functional_condition)}</td><td>{when(d.assigned_at)}</td></tr>)}</tbody></table>{!myDevices.length && <Empty title="No virtual responsibilities" detail="The Asset Manager will map HHD Serial / IMEI numbers against your custodian allocation."/>}</div>
+        <div className="ol-simple-table"><table><thead><tr><th>Asset serial</th><th>IMEI</th><th>Device</th><th>Physical owner</th><th>Current shift holder</th><th>Stock state</th><th>Condition</th><th>Mapped on</th></tr></thead><tbody>{custodianAssignments.map((d) => <tr key={d.assignment_id}><td className="ol-mono">{d.device_serial}</td><td className="ol-mono">{d.imei || '—'}</td><td>{d.make} {d.model}</td><td>{human(d.owner_department)}</td><td>{d.current_holder_type === 'offroll' ? <Pill tone="violet">{d.current_holder_name || d.current_holder_employee_id}</Pill> : 'Operations Inventory'}</td><td><Pill tone={d.stock_state === 'available' ? 'success' : d.stock_state === 'assigned' ? 'info' : 'warning'}>{human(d.stock_state)}</Pill></td><td>{human(d.physical_condition)} / {human(d.functional_condition)}</td><td>{when(d.assigned_at)}</td></tr>)}</tbody></table>{!custodianAssignments.length && <Empty title="No virtual responsibilities" detail="The Asset Manager will map HHD Serial / IMEI numbers against your custodian allocation."/>}</div>
       </Panel>}
 
       {page === 'hoto' && <HotoWizard site={site} onComplete={() => loadSiteData(site)} />}
