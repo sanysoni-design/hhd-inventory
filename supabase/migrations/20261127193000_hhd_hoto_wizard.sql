@@ -373,6 +373,7 @@ begin
   v_from_id := v_pos.current_holder_employee_id;
   if v_from_type is null then raise exception 'Current HHD custody is not recorded'; end if;
   if p_transaction_type='mid_shift_swap' and v_from_type<>'offroll' then raise exception 'Mid-shift swap requires a current GC / TL holder'; end if;
+  if p_transaction_type='mid_shift_swap' and upper(coalesce(v_from_id,''))=v_worker_id then raise exception 'This GC / TL is already the current holder of the device'; end if;
   if v_from_type='offroll' then
     select coalesce(w.employee_name,h.to_holder_name,v_from_id)
       into v_from_name
