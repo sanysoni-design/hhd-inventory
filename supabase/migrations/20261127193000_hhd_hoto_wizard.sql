@@ -1,5 +1,14 @@
 begin;
 
+-- Site IT performs the physical HOTO scans. Grant only HOTO view/create/swap/
+-- takeover permissions at explicitly assigned sites; no global scope is added.
+insert into public.role_permissions(role_code,permission_code,is_allowed,data_scope)
+select 'site_it',p.permission_code,true,'assigned_sites'
+from public.app_permissions p
+where p.permission_code in ('hoto.view','hoto.create','hoto.swap','hoto.acknowledge')
+on conflict (role_code,permission_code) do update
+set is_allowed=excluded.is_allowed,data_scope='assigned_sites',updated_at=now();
+
 -- HOTO wizard: support a device moving into IT custody and audit controlled
 -- manual GC/TL overrides without writing those overrides into the HR master.
 alter table public.hoto_transactions
