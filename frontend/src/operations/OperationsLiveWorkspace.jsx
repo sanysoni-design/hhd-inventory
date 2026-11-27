@@ -37,6 +37,8 @@ function ScanInput({ value, onChange, placeholder = 'Scan barcode or type value'
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const videoRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     if (!cameraOpen) return undefined;
@@ -68,7 +70,7 @@ function ScanInput({ value, onChange, placeholder = 'Scan barcode or type value'
           try {
             const found = await detector.detect(videoRef.current);
             if (found?.length && found[0]?.rawValue) {
-              onChange(found[0].rawValue);
+              onChangeRef.current(found[0].rawValue);
               setCameraOpen(false);
               return;
             }
@@ -86,7 +88,7 @@ function ScanInput({ value, onChange, placeholder = 'Scan barcode or type value'
 
     start();
     return () => { active = false; close(); };
-  }, [cameraOpen, onChange]);
+  }, [cameraOpen]);
 
   return (
     <div className="ol-scan-control">
@@ -618,8 +620,24 @@ export default function OperationsLiveWorkspace() {
       {(error || notice) && <div className={`ol-banner ${error ? 'ol-banner-error' : 'ol-banner-success'}`}><span>{error || notice}</span><button onClick={() => { setError(''); setNotice(''); }}><X size={15}/></button></div>}
       {busy && <div className="ol-loading"><span/></div>}
 
+ 
+      {page === 'account' && <Panel title="My account & password" subtitle="All application roles can update their own password. Passwords are never visible to administrators or stored in the business database.">
+        <div className="ol-account-summary">
+          <div><span>ACCOUNT HOLDER</span><strong>{profile?.full_name}</strong><small>{profile?.employee_id || 'Admin account'} · {primaryRoleName}</small></div>
+          <div><span>REGISTERED EMAIL</span><strong>{profile?.email || '—'}</strong><small>Used for password recovery</small></div>
+          <div><span>ACTIVE SITE</span><strong>{site || '—'}</strong><small>{roleAssignments.map((r) => r.site_code === '*' ? 'All sites' : r.site_code).filter((x, i, arr) => arr.indexOf(x) === i).join(', ')}</small></div>
+        </div>
+        <form className="ol-form-grid ol-password-form" onSubmit={savePasswordChange}>
+          <Field label="Current password"><input type="password" autoComplete="current-password" value={passwordForm.current} onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })} required/></Field>
+          <Field label="New password (minimum 6 characters)"><input type="password" autoComplete="new-password" minLength={6} maxLength={72} value={passwordForm.next} onChange={(e) => setPasswordForm({ ...passwordForm, next: e.target.value })} required/></Field>
+          <Field label="Confirm new password"><input type="password" autoComplete="new-password" minLength={6} maxLength={72} value={passwordForm.confirm} onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })} required/></Field>
+          <div className="ol-form-actions"><Button type="submit" disabled={busy}>Change my password</Button></div>
+        </form>
+        <div className="ol-form-note">Forgot your password? Sign out and use “Forgot password?” on the login screen. A recovery link is sent only to your registered email.</div>
+      </Panel>}
+
       {page === 'overview' && <>
-        <div className="ol-welcome"><div><span className="ol-eyebrow">SITE WORKSPACE</span><h2>{site || 'No site assigned'}</h2><p>Authenticated as {primaryRoleName}. Only assigned site and record permissions are available.</p></div><Pill tone="info">{currentRoles.map((r) => human(r.role_code)).join(' / ') || 'No role'}</Pill></div>
+        <div className="ol-welcome"><div><span className="ol-eyebrow">SITE WORKSPACE</span><h2>{site || 'No site assigned'}</h2><p>Authenticated as {primaryRoleName}. Only assigned site and record permissions are available.</p></div><Pill tone="info">{currentRoles.map((r) => roleName(r.role_code)).join(' / ') || 'No role'}</Pill></div>
         <div className="ol-metric-grid">
           <Metric title="Available Ops stock" value={fmt(summary.available)} note="Good + working + unallocated" icon={Boxes} tone="blue"/>
           <Metric title="Assigned devices" value={fmt(summary.assigned)} note="Primary on-roll assignments" icon={Smartphone} tone="violet"/>
@@ -810,7 +828,42 @@ export default function OperationsLiveWorkspace() {
         <div className="ol-form-note">The form refuses to overwrite an asset with an active employee assignment. Scan duplicates and unknown serials must be resolved before reconciliation.</div>
       </Panel>}
 
-      {page === 'sto' && <Panel title="STO module integration pending" subtitle="This phase connects Operations stock, employee allocation, HR validation and HOTO. The universal STO dispatch/receipt engine is the next backend module."><div className="ol-alert ol-alert-info">The existing Site IT / Operations Apps Script STO workflow is not replaced by this phase. Do not use this screen for live stock transfers yet.</div></Panel>}
+
+      {page === 'sto' && <>
+        {(can('sto', 'create') && can('sto', 'dispatch')) && <Panel title="Create & dispatch Stock Transfer Order" subtitle={`Scan each HHD at the source site. Dispatch is recorded against the canonical Serial and IMEI.`}>
+          <form className="ol-form-grid" onSubmit={addStoScan}>
+            <Field label="Source site"><input value={site} disabled/></Field>
+            <Field label="Destination site"><select value={stoForm.to_site_code} onChange={(e) => setStoForm({ ...stoForm, to_site_code: e.target.value })} required><option value="">Select destination</option>{siteOptions.filter((s) => s !== site).map((s) => <option key={s} value={s}>{s}</option>)}</select></Field>
+            <Field label="Scan HHD Serial / IMEI"><ScanInput value={stoForm.scan_value} onChange={(value) => setStoForm((x) => ({ ...x, scan_value: value }))} required placeholder="Scan device barcode"/></Field>
+            <Field label="Dispatch notes"><input value={stoForm.notes} onChange={(e) => setStoForm({ ...stoForm, notes: e.target.value })} placeholder="Reason / reference / vehicle details"/></Field>
+            <div className="ol-form-actions"><Button type="submit" tone="secondary" disabled={busy || !stoForm.scan_value.trim()}>Add scanned device</Button></div>
+          </form>
+          <div className="ol-sto-scan-list">
+            <div className="ol-sto-scan-heading"><strong>Scanned devices</strong><Pill tone="info">{stoScans.length} HHD(s)</Pill></div>
+            {stoScans.map((scan, index) => <div className="ol-sto-scan-item" key={`${scan}:${index}`}><span>{index + 1}. {scan}</span><button type="button" onClick={() => setStoScans((rows) => rows.filter((_, i) => i !== index))}>Remove</button></div>)}
+            {!stoScans.length && <small>No devices added yet. Each barcode must be unique and reconciled at this source site.</small>}
+          </div>
+          <div className="ol-form-actions"><Button type="button" disabled={busy || !stoForm.to_site_code || !stoScans.length} onClick={() => createAndDispatchSto({ preventDefault: () => {} })}>Create STO & dispatch {stoScans.length ? `(${stoScans.length})` : ''}</Button></div>
+          <div className="ol-form-note">The backend validates every serial/IMEI, source site, ownership, stock state, condition, assignments and open transfers in one transaction.</div>
+        </Panel>}
+        {(can('sto', 'receive')) && <Panel title="Receive HHD against an STO" subtitle="Scan each physical HHD at the destination. Partial receipts are supported.">
+          <form className="ol-form-grid" onSubmit={receiveStoDevice}>
+            <Field label="Incoming STO"><select value={stoReceiveForm.sto_id} onChange={(e) => setStoReceiveForm({ ...stoReceiveForm, sto_id: e.target.value })} required><option value="">Select open incoming STO</option>{stoRows.filter((r) => r.to_site_code === site && ['dispatched','partially_received'].includes(r.status)).map((r) => <option key={r.id} value={r.id}>{r.sto_number} · {r.received_count}/{r.device_count} received · From {r.from_site_code}</option>)}</select></Field>
+            <Field label="Scan received HHD Serial / IMEI"><ScanInput value={stoReceiveForm.scan_value} onChange={(value) => setStoReceiveForm((x) => ({ ...x, scan_value: value }))} required placeholder="Scan physical HHD barcode"/></Field>
+            <Field label="Receiving department"><select value={stoReceiveForm.department} onChange={(e) => setStoReceiveForm({ ...stoReceiveForm, department: e.target.value })}><option value="operations">Operations</option><option value="it">IT</option><option value="superstore">Superstore</option></select></Field>
+            <Field label="Receipt notes"><input value={stoReceiveForm.notes} onChange={(e) => setStoReceiveForm({ ...stoReceiveForm, notes: e.target.value })}/></Field>
+            <div className="ol-form-actions"><Button type="submit" disabled={busy || !stoReceiveForm.sto_id || !stoReceiveForm.scan_value.trim()}>Confirm scanned receipt</Button></div>
+          </form>
+        </Panel>}
+        <Panel title="Stock transfer register" subtitle="Dispatch and receipt status across the active site.">
+          <div className="ol-simple-table"><table><thead><tr><th>STO number</th><th>From</th><th>To</th><th>Status</th><th>Devices</th><th>Received</th><th>Dispatched</th></tr></thead><tbody>{stoRows.map((r) => <tr key={r.id}><td className="ol-mono">{r.sto_number}</td><td>{r.from_site_code}</td><td>{r.to_site_code}</td><td><Pill tone={r.status === 'received' ? 'success' : r.status === 'cancelled' ? 'danger' : 'warning'}>{human(r.status)}</Pill></td><td>{r.device_count}</td><td>{r.received_count}</td><td>{when(r.dispatched_at)}</td></tr>)}</tbody></table>{!stoRows.length && <Empty title="No STO records" detail="Created and incoming Stock Transfer Orders will appear here."/>}</div>
+        </Panel>
+      </>}
+
+      {page === 'movement' && <Panel title="IMEI-level device movement ledger" subtitle="Chronological, append-only movement and condition history for each device.">
+        <div className="ol-toolbar"><Search size={16}/><input placeholder="Search Serial, IMEI, event or reference" value={search} onChange={(e) => setSearch(e.target.value)}/><Button tone="secondary" onClick={async () => { const rows = await operationsApi.listDeviceMovements(site, search, 300); setMovementRows(Array.isArray(rows) ? rows : []); }} disabled={busy}>Search ledger</Button></div>
+        <div className="ol-simple-table"><table><thead><tr><th>Date/time</th><th>Asset Serial</th><th>IMEI</th><th>Event</th><th>From</th><th>To</th><th>Condition</th><th>Reference</th><th>Performed by</th></tr></thead><tbody>{movementRows.filter((m) => `${m.device_serial} ${m.imei_number} ${m.event_type} ${m.reference_id} ${m.notes}`.toLowerCase().includes(search.toLowerCase())).map((m) => <tr key={m.id}><td>{when(m.performed_at)}</td><td className="ol-mono">{m.device_serial}</td><td className="ol-mono">{m.imei_number || '—'}</td><td><Pill tone="info">{human(m.event_type)}</Pill></td><td>{m.from_department || m.from_holder_id || '—'}</td><td>{m.to_department || m.to_holder_id || '—'}</td><td>{human(m.physical_condition)} / {human(m.functional_condition)}</td><td>{m.reference_type || '—'} {m.reference_id || ''}</td><td className="ol-mono">{String(m.performed_by || '').slice(0, 8) || 'System'}</td></tr>)}</tbody></table>{!movementRows.length && <Empty title="No movement history" detail="Device movements will appear after reconciliation, allocation, return, HOTO or STO transactions."/>}</div>
+      </Panel>}
 
       <footer className="ol-footer"><span>HHD Control · Phase 1 live workspace</span><span>Backend authorization active · {site}</span></footer>
     </main>
