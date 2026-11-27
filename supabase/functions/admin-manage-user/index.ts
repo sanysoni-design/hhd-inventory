@@ -89,6 +89,7 @@ export default {
       const roleCode = clean(body.role_code);
       const siteCodes = cleanSites(body.site_codes, body.site_code);
       if (!roleCode || !siteCodes.length) return json({ error: 'Role and at least one site are required' }, 400);
+      if (roleCode === 'assigned_employee' && siteCodes.length > 1) return json({ error: 'Custodian accounts are tied to one On-roll Employee Master site. Assign a single site.' }, 400);
       if (!password) return json({ error: 'Set an initial password for the new account' }, 400);
       if (OPERATIONS_ROLES.has(roleCode) && (!employeeId || !designation)) {
         return json({ error: 'Employee ID and designation are required for this Operations role' }, 400);
