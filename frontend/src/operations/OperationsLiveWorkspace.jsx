@@ -10,6 +10,7 @@ import {
   setAccountPassword, signInWithEmail, signOut,
 } from './operationsApi.js';
 import './operations-live.css';
+import HotoWizard from './HotoWizard.jsx';
 
 const fmt = (v) => v == null ? '—' : new Intl.NumberFormat('en-IN').format(Number(v) || 0);
 const when = (v) => v ? new Date(v).toLocaleString('en-IN') : '—';
@@ -692,36 +693,7 @@ export default function OperationsLiveWorkspace() {
         </Panel>
       </>}
 
-      {page === 'hoto' && <>
-        <Panel title="TL / GC shift handover" subtitle="Off-roll worker identity is validated against the HR-synchronized master. TL/GC do not sign in to the application.">
-          <form className="ol-form-grid" onSubmit={submitHoto}>
-            <Field label="HHD asset Serial / IMEI"><ScanInput value={hotoForm.serial} onChange={(value) => setHotoForm((x) => ({ ...x, serial: value }))} required placeholder="Scan HHD barcode"/></Field>
-            <Field label="Scan TL / GC Employee ID"><ScanInput value={hotoForm.worker_id} onChange={(value) => setHotoForm((x) => ({ ...x, worker_id: value.toUpperCase() }))} required placeholder="Scan or enter GC / TL ID" listId="hoto-worker-ids" listOptions={offrollWorkers.filter((w) => w.employment_status === 'active').map((w) => ({ value: w.employee_id, label: `${w.employee_name} · ${w.worker_type}` }))}/></Field>
-            <Field label="HOTO action"><select value={hotoForm.type} onChange={(e) => setHotoForm({ ...hotoForm, type: e.target.value })}><option value="handover">Initial handover from on-roll custodian</option><option value="takeover">Shift takeover by next TL/GC</option><option value="mid_shift_swap">Mid-shift swap</option></select></Field>
-            <Field label="Shift"><select value={hotoForm.shift} onChange={(e) => setHotoForm({ ...hotoForm, shift: e.target.value })}><option value="A">Shift A</option><option value="B">Shift B</option><option value="C">Shift C</option></select></Field>
-            <Field label="Shift date"><input type="date" value={hotoForm.date} onChange={(e) => setHotoForm({ ...hotoForm, date: e.target.value })} required/></Field>
-            <Field label="Physical condition"><select value={hotoForm.physical} onChange={(e) => setHotoForm({ ...hotoForm, physical: e.target.value })}><option value="good">Good</option><option value="damaged" disabled>Damaged — cannot hand over</option></select></Field>
-            <Field label="Functional condition"><select value={hotoForm.functional} onChange={(e) => setHotoForm({ ...hotoForm, functional: e.target.value })}><option value="working">Working</option><option value="not_working" disabled>Not Working — cannot hand over</option></select></Field>
-            <Field label="Notes"><input value={hotoForm.notes} onChange={(e) => setHotoForm({ ...hotoForm, notes: e.target.value })}/></Field>
-            <div className="ol-form-actions"><Button type="submit" disabled={busy || !hotoForm.serial || !hotoForm.worker_id}>Validate HR ID and record HOTO</Button></div>
-          </form>
-        </Panel>
-        <Panel title="Return from TL/GC to primary custodian" subtitle="Record the physical and functional condition when the worker returns the HHD.">
-          <form className="ol-form-grid" onSubmit={submitHotoReturn}>
-            <Field label="Scan asset Serial / IMEI"><ScanInput value={hotoReturnForm.serial} onChange={(value) => setHotoReturnForm((x) => ({ ...x, serial: value }))} required/></Field>
-            <Field label="Physical condition"><select value={hotoReturnForm.physical} onChange={(e) => setHotoReturnForm({ ...hotoReturnForm, physical: e.target.value })}><option value="good">Good</option><option value="damaged">Damaged</option></select></Field>
-            <Field label="Functional condition"><select value={hotoReturnForm.functional} onChange={(e) => setHotoReturnForm({ ...hotoReturnForm, functional: e.target.value })}><option value="working">Working</option><option value="not_working">Not Working</option></select></Field>
-            <Field label="Shift"><select value={hotoReturnForm.shift} onChange={(e) => setHotoReturnForm({ ...hotoReturnForm, shift: e.target.value })}><option value="A">Shift A</option><option value="B">Shift B</option><option value="C">Shift C</option></select></Field>
-            <Field label="Shift date"><input type="date" value={hotoReturnForm.date} onChange={(e) => setHotoReturnForm({ ...hotoReturnForm, date: e.target.value })}/></Field>
-            <Field label="Notes"><input value={hotoReturnForm.notes} onChange={(e) => setHotoReturnForm({ ...hotoReturnForm, notes: e.target.value })}/></Field>
-            <div className="ol-form-actions"><Button type="submit" disabled={busy || !hotoReturnForm.serial}>Record return to primary custodian</Button></div>
-          </form>
-          <div className="ol-form-note">If the returned device is damaged or not working, Asset Manager must subsequently close the primary assignment through the device return action so it moves to quarantine.</div>
-        </Panel>
-        <Panel title="Recent HOTO history" subtitle="Each line records the current holder transition and the operator who performed the transaction.">
-          <div className="ol-simple-table"><table><thead><tr><th>Date/time</th><th>Device</th><th>Shift</th><th>Action</th><th>From</th><th>To</th><th>Worker type</th></tr></thead><tbody>{hotoRows.slice(0, 100).map((h) => <tr key={h.id}><td>{when(h.performed_at)}</td><td className="ol-mono">{h.device_serial}</td><td>{h.shift_code}</td><td>{human(h.transaction_type)}</td><td>{h.from_holder_employee_id}</td><td>{h.to_holder_employee_id}</td><td>{h.offroll_worker_type || 'On-roll'}</td></tr>)}</tbody></table>{!hotoRows.length && <Empty title="No HOTO transactions" detail="Handover and takeover records will appear after the first transaction."/>}</div>
-        </Panel>
-      </>}
+      {page === 'hoto' && <HotoWizard site={site} onComplete={() => loadSiteData(site)} />}
 
       {page === 'employees' && can('admin_employees', 'view') && <Panel title="On-roll employee master" subtitle="Only active employees with an individual application login can receive allocations.">
         {can('admin_employees', 'create') && <form className="ol-form-grid ol-form-compact" onSubmit={createEmployee}>
