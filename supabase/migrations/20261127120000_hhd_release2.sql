@@ -109,7 +109,8 @@ declare
   v_actor uuid := auth.uid();
 begin
   if old."Status" is distinct from new."Status"
-     or old."FaultReason" is distinct from new."FaultReason" then
+     or old."FaultReason" is distinct from new."FaultReason"
+     or old.imei_number is distinct from new.imei_number then
     select p.site_code into v_site
     from public.device_stock_positions p
     where p.device_serial = new."Serial";
@@ -119,9 +120,14 @@ begin
       notes, performed_by, metadata
     )
     values (
-      new."Serial", new.imei_number, 'device_master_status_changed', v_site,
-      'Device master status or fault reason changed', v_actor,
+      new."Serial", new.imei_number,
+      case when old.imei_number is distinct from new.imei_number
+        then 'device_imei_changed' else 'device_master_status_changed' end,
+      v_site,
+      'Device master IMEI, status or fault reason changed', v_actor,
       jsonb_build_object(
+        'old_imei', old.imei_number,
+        'new_imei', new.imei_number,
         'old_status', old."Status",
         'new_status', new."Status",
         'old_fault_reason', old."FaultReason",
@@ -135,9 +141,9 @@ begin
     )
     values (
       v_actor, 'inventory.device_master_status_changed', 'device', new."Serial", v_site,
-      jsonb_build_object('status', old."Status", 'fault_reason', old."FaultReason"),
-      jsonb_build_object('status', new."Status", 'fault_reason', new."FaultReason"),
-      'Device master Status / FaultReason field changed'
+      jsonb_build_object('imei', old.imei_number, 'status', old."Status", 'fault_reason', old."FaultReason"),
+      jsonb_build_object('imei', new.imei_number, 'status', new."Status", 'fault_reason', new."FaultReason"),
+      'Device master IMEI / Status / FaultReason field changed'
     );
   end if;
   return new;
@@ -146,7 +152,7 @@ $$;
 
 drop trigger if exists hhd_device_master_status_change on public.devices;
 create trigger hhd_device_master_status_change
-after update of "Status", "FaultReason" on public.devices
+after update of "Status", "FaultReason", imei_number on public.devices
 for each row execute function public.hhd_audit_device_master_status_change();
 
 -- Capture every stock owner, stock-state and working-condition transition separately
