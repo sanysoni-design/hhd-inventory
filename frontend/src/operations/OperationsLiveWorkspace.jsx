@@ -124,6 +124,11 @@ export default function OperationsLiveWorkspace() {
   const [employees, setEmployees] = useState([]);
   const [offrollWorkers, setOffrollWorkers] = useState([]);
   const [myDevices, setMyDevices] = useState([]);
+  const [custodianAssignments, setCustodianAssignments] = useState([]);
+  const [conditionDashboard, setConditionDashboard] = useState(null);
+  const [conditionLoading, setConditionLoading] = useState(false);
+  const [conditionRange, setConditionRange] = useState('56');
+  const [conditionSearch, setConditionSearch] = useState('');
   const [users, setUsers] = useState([]);
   const [roleData, setRoleData] = useState({ roles: [], permissions: [], role_permissions: [] });
   const [hrRuns, setHrRuns] = useState([]);
@@ -131,7 +136,7 @@ export default function OperationsLiveWorkspace() {
   const [movementRows, setMovementRows] = useState([]);
   const [stoRows, setStoRows] = useState([]);
   const [stoScans, setStoScans] = useState([]);
-  const [stoForm, setStoForm] = useState({ to_site_code: '', scan_value: '', notes: '' });
+  const [stoForm, setStoForm] = useState({ to_site_code: '', to_department: 'it', scan_value: '', notes: '' });
   const [stoReceiveForm, setStoReceiveForm] = useState({ sto_id: '', scan_value: '', department: 'operations', notes: '' });
   const [editingUser, setEditingUser] = useState(null);
   const [editUserForm, setEditUserForm] = useState({ user_id: '', full_name: '', email: '', login_id: '', employee_id: '', designation: '', process: '', password: '' });
@@ -244,6 +249,10 @@ export default function OperationsLiveWorkspace() {
         const my = await safe(() => operationsApi.listMyDevices(), []);
         setMyDevices(Array.isArray(my) ? my : []);
       } else setMyDevices([]);
+      if (can('distribution', 'view') || can('employee_collection', 'view')) {
+        const assigned = await safe(() => operationsApi.listCustodianDeviceAssignments(siteCode), []);
+        setCustodianAssignments(Array.isArray(assigned) ? assigned : []);
+      } else setCustodianAssignments([]);
       if (isAdmin || can('admin_users', 'view')) {
         const u = await safe(() => operationsApi.listUsers(isAdmin ? '*' : siteCode), []);
         setUsers(Array.isArray(u) ? u : []);
@@ -264,7 +273,7 @@ export default function OperationsLiveWorkspace() {
         const movements = await safe(() => operationsApi.listDeviceMovements(siteCode, '', 200), []);
         setMovementRows(Array.isArray(movements) ? movements : []);
       } else setMovementRows([]);
-      if (can('sto', 'view') || can('sto', 'receive') || can('sto', 'dispatch') || can('sto', 'create')) {
+      if (can('sto', 'view') || can('sto', 'receive') || can('sto', 'dispatch') || can('sto', 'create') || can('sto', 'approve')) {
         const sto = await safe(() => operationsApi.listSto(siteCode, 100), []);
         setStoRows(Array.isArray(sto) ? sto : []);
       } else setStoRows([]);
@@ -275,7 +284,24 @@ export default function OperationsLiveWorkspace() {
     }
   }, [context, can, isAdmin]);
 
+  const loadConditionDashboard = useCallback(async () => {
+    if (!context || !site || !can('inventory', 'condition_history')) return;
+    setConditionLoading(true);
+    const toDate = new Date().toISOString().slice(0, 10);
+    const days = Math.max(7, Number(conditionRange) || 56);
+    const fromDate = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
+    try {
+      const result = await operationsApi.getDeviceConditionDashboard(site, fromDate, toDate, conditionSearch, 500);
+      setConditionDashboard(result || null);
+    } catch (e) {
+      flash(e.message || 'Condition history could not be loaded.', 'error');
+    } finally {
+      setConditionLoading(false);
+    }
+  }, [context, site, can, conditionRange, conditionSearch]);
+
   useEffect(() => { if (context && site) loadSiteData(site); }, [context, site, loadSiteData]);
+  useEffect(() => { if (page === 'condition-dashboard') loadConditionDashboard(); }, [page, loadConditionDashboard]);
 
   const login = async (e) => {
     e.preventDefault();
