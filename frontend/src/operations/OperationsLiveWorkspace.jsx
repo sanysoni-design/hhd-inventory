@@ -517,6 +517,43 @@ export default function OperationsLiveWorkspace() {
     } catch (e2) { flash(e2.message || 'Reconciliation failed.', 'error'); }
   };
 
+
+  const addStoScan = (e) => {
+    e.preventDefault();
+    const scan = stoForm.scan_value.trim();
+    if (!scan) return;
+    if (stoScans.some((value) => value.toLowerCase() === scan.toLowerCase())) return flash('This device is already in the STO scan list.', 'error');
+    setStoScans((rows) => [...rows, scan]);
+    setStoForm((x) => ({ ...x, scan_value: '' }));
+  };
+
+  const createAndDispatchSto = async (e) => {
+    e.preventDefault();
+    if (!stoForm.to_site_code) return flash('Select a destination site.', 'error');
+    if (!stoScans.length) return flash('Scan at least one HHD before dispatch.', 'error');
+    try {
+      const result = await operationsApi.createAndDispatchSto(site, stoForm.to_site_code, stoScans, stoForm.notes);
+      flash(`${result.sto_number} dispatched with ${result.device_count} HHD(s).`);
+      setStoScans([]);
+      setStoForm({ to_site_code: '', scan_value: '', notes: '' });
+      await loadSiteData(site);
+    } catch (e2) { flash(e2.message || 'STO dispatch failed.', 'error'); }
+  };
+
+  const receiveStoDevice = async (e) => {
+    e.preventDefault();
+    if (!stoReceiveForm.sto_id || !stoReceiveForm.scan_value.trim()) return flash('Select an open STO and scan its HHD.', 'error');
+    try {
+      const result = await operationsApi.receiveStoDevice(
+        stoReceiveForm.sto_id, stoReceiveForm.scan_value.trim(),
+        stoReceiveForm.department, stoReceiveForm.notes,
+      );
+      flash(`${result.device_serial} received against ${result.sto_number}. ${result.remaining_devices} device(s) pending.`);
+      setStoReceiveForm((x) => ({ ...x, scan_value: '', notes: '' }));
+      await loadSiteData(site);
+    } catch (e2) { flash(e2.message || 'STO receipt failed.', 'error'); }
+  };
+
   const nav = useMemo(() => {
     const items = [{ id: 'overview', label: 'Overview', icon: LayoutDashboard }, { id: 'account', label: 'Account & Password', icon: LockKeyhole }];
     if (can('inventory', 'view')) items.push({ id: 'inventory', label: 'Inventory', icon: Boxes });
@@ -607,7 +644,7 @@ export default function OperationsLiveWorkspace() {
       </>}
 
       {page === 'allocations' && <>
-        {can('distribution', 'create') && <Panel title="Create quantity entitlement" subtitle="Site Lead authorizes quantity only. IMEIs are selected later by the assigned employee at physical collection.">
+        {can('distribution', 'create') && <Panel title="Create quantity entitlement" subtitle="Allocator authorizes quantity only. IMEIs are selected later by the assigned employee at physical collection.">
           <form className="ol-form-grid" onSubmit={saveAllocation}>
             <Field label="On-roll employee"><select value={allocationForm.employee_id} onChange={(e) => { const emp = employees.find((x) => x.employee_id === e.target.value); setAllocationForm((f) => ({ ...f, employee_id: e.target.value, process: emp?.process || f.process })); }} required><option value="">Select active employee</option>{allocatableEmployees.map((e) => <option key={e.employee_id} value={e.employee_id}>{e.employee_name} · {e.employee_id} · {e.designation}</option>)}</select></Field>
             <Field label="Process"><input value={allocationForm.process} onChange={(e) => setAllocationForm({ ...allocationForm, process: e.target.value })} placeholder="Inbound / Outbound / Processing" required/></Field>
@@ -615,7 +652,7 @@ export default function OperationsLiveWorkspace() {
             <Field label="Adjustment reason (mandatory for reduction)"><input value={allocationForm.reason} onChange={(e) => setAllocationForm({ ...allocationForm, reason: e.target.value })} placeholder="Operational requirement / reduction reason"/></Field>
             <div className="ol-form-actions"><Button type="submit" disabled={busy || !allocationForm.employee_id}>Save quantity allocation</Button></div>
           </form>
-          {selectedEmployee && <div className="ol-form-note">Selected: {selectedEmployee.employee_name} · {selectedEmployee.designation} · {selectedEmployee.site_code}. The Site Lead does not choose IMEI numbers.</div>}
+          {selectedEmployee && <div className="ol-form-note">Selected: {selectedEmployee.employee_name} · {selectedEmployee.designation} · {selectedEmployee.site_code}. The Allocator does not choose IMEI numbers.</div>}
         </Panel>}
         <Panel title="Site allocation register" subtitle="Allocated quantity, collected IMEIs and pending collection count.">
           <div className="ol-toolbar"><Search size={16}/><input placeholder="Search employee, ID or process" value={search} onChange={(e) => setSearch(e.target.value)}/></div>
@@ -627,7 +664,7 @@ export default function OperationsLiveWorkspace() {
         {can('employee_collection', 'scan_assign') && <Panel title="Physical device collection" subtitle={`Signed in as ${profile?.full_name} · Employee ID ${profile?.employee_id || 'not linked'}. Your login identity is the employee validation.`}>
           <form className="ol-scan-row" onSubmit={scanAssign}>
             <Field label="Your active allocation"><select value={scanForm.allocation_id || activeAllocation?.id || ''} onChange={(e) => setScanForm({ ...scanForm, allocation_id: e.target.value })}><option value="">Select allocation</option>{allocations.filter((a) => a.status === 'active').map((a) => <option key={a.id} value={a.id}>{a.process} · {a.collected_quantity}/{a.authorized_quantity} collected</option>)}</select></Field>
-            <Field label="Scan HHD IMEI or asset serial"><input autoFocus value={scanForm.scan_value} onChange={(e) => setScanForm({ ...scanForm, scan_value: e.target.value })} placeholder="Scan barcode / type serial" required/></Field>
+            <Field label="Scan HHD IMEI or asset serial"><ScanInput value={scanForm.scan_value} onChange={(value) => setScanForm((x) => ({ ...x, scan_value: value }))} placeholder="Scan barcode or type Serial / IMEI" required/></Field>
             <Button type="submit" disabled={busy || !scanForm.scan_value.trim() || !(scanForm.allocation_id || activeAllocation?.id)}><ScanLine size={16}/> Assign scanned HHD</Button>
           </form>
           <div className="ol-form-note">The server checks your active login, site, allocation limit, asset position, condition and duplicate assignment in one database transaction.</div>
@@ -640,8 +677,8 @@ export default function OperationsLiveWorkspace() {
       {page === 'hoto' && <>
         <Panel title="TL / GC shift handover" subtitle="Off-roll worker identity is validated against the HR-synchronized master. TL/GC do not sign in to the application.">
           <form className="ol-form-grid" onSubmit={submitHoto}>
-            <Field label="HHD asset serial or IMEI"><input value={hotoForm.serial} onChange={(e) => setHotoForm({ ...hotoForm, serial: e.target.value })} required/></Field>
-            <Field label="TL / GC Employee ID"><select value={hotoForm.worker_id} onChange={(e) => setHotoForm({ ...hotoForm, worker_id: e.target.value })} required><option value="">Select active HR worker</option>{offrollWorkers.filter((w) => w.employment_status === 'active').map((w) => <option key={w.employee_id} value={w.employee_id}>{w.employee_name} · {w.employee_id} · {w.worker_type}</option>)}</select></Field>
+            <Field label="HHD asset Serial / IMEI"><ScanInput value={hotoForm.serial} onChange={(value) => setHotoForm((x) => ({ ...x, serial: value }))} required placeholder="Scan HHD barcode"/></Field>
+            <Field label="Scan TL / GC Employee ID"><ScanInput value={hotoForm.worker_id} onChange={(value) => setHotoForm((x) => ({ ...x, worker_id: value.toUpperCase() }))} required placeholder="Scan or enter GC / TL ID" listId="hoto-worker-ids" listOptions={offrollWorkers.filter((w) => w.employment_status === 'active').map((w) => ({ value: w.employee_id, label: `${w.employee_name} · ${w.worker_type}` }))}/></Field>
             <Field label="HOTO action"><select value={hotoForm.type} onChange={(e) => setHotoForm({ ...hotoForm, type: e.target.value })}><option value="handover">Initial handover from on-roll custodian</option><option value="takeover">Shift takeover by next TL/GC</option><option value="mid_shift_swap">Mid-shift swap</option></select></Field>
             <Field label="Shift"><select value={hotoForm.shift} onChange={(e) => setHotoForm({ ...hotoForm, shift: e.target.value })}><option value="A">Shift A</option><option value="B">Shift B</option><option value="C">Shift C</option></select></Field>
             <Field label="Shift date"><input type="date" value={hotoForm.date} onChange={(e) => setHotoForm({ ...hotoForm, date: e.target.value })} required/></Field>
@@ -653,7 +690,7 @@ export default function OperationsLiveWorkspace() {
         </Panel>
         <Panel title="Return from TL/GC to primary custodian" subtitle="Record the physical and functional condition when the worker returns the HHD.">
           <form className="ol-form-grid" onSubmit={submitHotoReturn}>
-            <Field label="Asset serial or IMEI"><input value={hotoReturnForm.serial} onChange={(e) => setHotoReturnForm({ ...hotoReturnForm, serial: e.target.value })} required/></Field>
+            <Field label="Scan asset Serial / IMEI"><ScanInput value={hotoReturnForm.serial} onChange={(value) => setHotoReturnForm((x) => ({ ...x, serial: value }))} required/></Field>
             <Field label="Physical condition"><select value={hotoReturnForm.physical} onChange={(e) => setHotoReturnForm({ ...hotoReturnForm, physical: e.target.value })}><option value="good">Good</option><option value="damaged">Damaged</option></select></Field>
             <Field label="Functional condition"><select value={hotoReturnForm.functional} onChange={(e) => setHotoReturnForm({ ...hotoReturnForm, functional: e.target.value })}><option value="working">Working</option><option value="not_working">Not Working</option></select></Field>
             <Field label="Shift"><select value={hotoReturnForm.shift} onChange={(e) => setHotoReturnForm({ ...hotoReturnForm, shift: e.target.value })}><option value="A">Shift A</option><option value="B">Shift B</option><option value="C">Shift C</option></select></Field>
@@ -661,7 +698,7 @@ export default function OperationsLiveWorkspace() {
             <Field label="Notes"><input value={hotoReturnForm.notes} onChange={(e) => setHotoReturnForm({ ...hotoReturnForm, notes: e.target.value })}/></Field>
             <div className="ol-form-actions"><Button type="submit" disabled={busy || !hotoReturnForm.serial}>Record return to primary custodian</Button></div>
           </form>
-          <div className="ol-form-note">If the returned device is damaged or not working, Operations SPOC must subsequently close the primary assignment through the device return action so it moves to quarantine.</div>
+          <div className="ol-form-note">If the returned device is damaged or not working, Asset Manager must subsequently close the primary assignment through the device return action so it moves to quarantine.</div>
         </Panel>
         <Panel title="Recent HOTO history" subtitle="Each line records the current holder transition and the operator who performed the transaction.">
           <div className="ol-simple-table"><table><thead><tr><th>Date/time</th><th>Device</th><th>Shift</th><th>Action</th><th>From</th><th>To</th><th>Worker type</th></tr></thead><tbody>{hotoRows.slice(0, 100).map((h) => <tr key={h.id}><td>{when(h.performed_at)}</td><td className="ol-mono">{h.device_serial}</td><td>{h.shift_code}</td><td>{human(h.transaction_type)}</td><td>{h.from_holder_employee_id}</td><td>{h.to_holder_employee_id}</td><td>{h.offroll_worker_type || 'On-roll'}</td></tr>)}</tbody></table>{!hotoRows.length && <Empty title="No HOTO transactions" detail="Handover and takeover records will appear after the first transaction."/>}</div>
@@ -673,7 +710,7 @@ export default function OperationsLiveWorkspace() {
           <Field label="Employee ID"><input value={employeeForm.employee_id} onChange={(e) => setEmployeeForm({ ...employeeForm, employee_id: e.target.value.toUpperCase() })} required/></Field>
           <Field label="Employee name"><input value={employeeForm.employee_name} onChange={(e) => setEmployeeForm({ ...employeeForm, employee_name: e.target.value })} required/></Field>
           <Field label="Site"><select value={employeeForm.site_code || site} onChange={(e) => setEmployeeForm({ ...employeeForm, site_code: e.target.value })}>{siteOptions.map((s) => <option key={s}>{s}</option>)}</select></Field>
-          <Field label="Designation"><select value={employeeForm.designation} onChange={(e) => setEmployeeForm({ ...employeeForm, designation: e.target.value })}><option>Lead</option><option>Sr. Lead</option><option>AM</option><option>Operations SPOC</option><option>Site Lead</option></select></Field>
+          <Field label="Designation"><select value={employeeForm.designation} onChange={(e) => setEmployeeForm({ ...employeeForm, designation: e.target.value })}><option>Lead</option><option>Sr. Lead</option><option>AM</option><option>Asset Manager</option><option>Allocator</option></select></Field>
           <Field label="Process"><input value={employeeForm.process} onChange={(e) => setEmployeeForm({ ...employeeForm, process: e.target.value })}/></Field>
           <Field label="Work email"><input type="email" value={employeeForm.email} onChange={(e) => setEmployeeForm({ ...employeeForm, email: e.target.value })}/></Field>
           <div className="ol-form-actions"><Button type="submit">Save employee master</Button></div>
@@ -743,7 +780,7 @@ export default function OperationsLiveWorkspace() {
 
       {page === 'reconcile' && <Panel title="Opening stock reconciliation" subtitle="Use this only during a controlled physical opening-stock count. It writes an audited position and movement event.">
         <form className="ol-form-grid" onSubmit={reconcilePosition}>
-          <Field label="Device asset Serial (not IMEI if duplicate) "><input value={reconcileForm.device_serial} onChange={(e) => setReconcileForm({ ...reconcileForm, device_serial: e.target.value })} required/></Field>
+          <Field label="Scan device Serial / unique IMEI"><ScanInput value={reconcileForm.device_serial} onChange={(value) => setReconcileForm((x) => ({ ...x, device_serial: value }))} required/></Field>
           <Field label="Site"><select value={reconcileForm.site_code || site} onChange={(e) => setReconcileForm({ ...reconcileForm, site_code: e.target.value })}>{siteOptions.map((s) => <option key={s}>{s}</option>)}</select></Field>
           <Field label="Current owner department"><select value={reconcileForm.owner_department} onChange={(e) => setReconcileForm({ ...reconcileForm, owner_department: e.target.value })}>{['operations','it','superstore','in_transit','vendor'].map((v) => <option key={v}>{v}</option>)}</select></Field>
           <Field label="Stock state"><select value={reconcileForm.stock_state} onChange={(e) => setReconcileForm({ ...reconcileForm, stock_state: e.target.value })}>{['available','in_transit','quarantined','maintenance','lost','retired'].map((v) => <option key={v}>{v}</option>)}</select></Field>
