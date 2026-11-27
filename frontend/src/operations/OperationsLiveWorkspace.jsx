@@ -529,8 +529,7 @@ export default function OperationsLiveWorkspace() {
     setStoForm((x) => ({ ...x, scan_value: '' }));
   };
 
-  const createAndDispatchSto = async (e) => {
-    e.preventDefault();
+  const createAndDispatchSto = async () => {
     if (!stoForm.to_site_code) return flash('Select a destination site.', 'error');
     if (!stoScans.length) return flash('Scan at least one HHD before dispatch.', 'error');
     try {
@@ -743,7 +742,7 @@ export default function OperationsLiveWorkspace() {
             <Field label="Work email"><input type="email" value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} required/></Field>
             <Field label="Login ID"><input value={userForm.login_id} onChange={(e) => setUserForm({ ...userForm, login_id: e.target.value })} required/></Field>
             <Field label="Employee ID"><input value={userForm.employee_id} onChange={(e) => setUserForm({ ...userForm, employee_id: e.target.value.toUpperCase() })} placeholder="Required for Operations roles"/></Field>
-            <Field label="Role"><select value={userForm.role_code} onChange={(e) => setUserForm({ ...userForm, role_code: e.target.value })}>{roleData.roles.map((r) => <option key={r.role_code} value={r.role_code}>{r.role_name}</option>)}</select></Field>
+            <Field label="Role"><select value={userForm.role_code} onChange={(e) => setUserForm({ ...userForm, role_code: e.target.value, site_codes: [], site_code: e.target.value === 'admin' ? '*' : site })}>{roleData.roles.map((r) => <option key={r.role_code} value={r.role_code}>{r.role_name}</option>)}</select></Field>
             <Field label="Assigned site(s)" hint="Use Ctrl / Cmd to select multiple sites. All sites is reserved for Admin."><select multiple size={Math.min(6, Math.max(3, siteOptions.length))} value={userForm.site_codes.length ? userForm.site_codes : [userForm.site_code || site]} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setUserForm({ ...userForm, site_codes: selected, site_code: selected[0] || '' }); }} required>
               {(userForm.role_code === 'admin' ? ['*'] : siteOptions).map((s) => <option key={s} value={s}>{s === '*' ? 'All sites' : s}</option>)}
             </select></Field>
@@ -758,7 +757,7 @@ export default function OperationsLiveWorkspace() {
         {can('admin_users', 'update') && <Panel title="Assign an additional role" subtitle="Role assignments are site-scoped. Admin is the only role permitted to have global (*) scope.">
           <form className="ol-form-grid ol-form-compact" onSubmit={assignAdditionalRole}>
             <Field label="Application user"><select value={roleAssignmentForm.user_id} onChange={(e) => setRoleAssignmentForm({ ...roleAssignmentForm, user_id: e.target.value })} required><option value="">Select account</option>{users.filter((u) => u.account_status !== 'deactivated').map((u) => <option key={u.user_id} value={u.user_id}>{u.full_name} · {u.login_id}</option>)}</select></Field>
-            <Field label="Role"><select value={roleAssignmentForm.role_code} onChange={(e) => setRoleAssignmentForm({ ...roleAssignmentForm, role_code: e.target.value })}>{roleData.roles.map((r) => <option key={r.role_code} value={r.role_code}>{r.role_name}</option>)}</select></Field>
+            <Field label="Role"><select value={roleAssignmentForm.role_code} onChange={(e) => setRoleAssignmentForm({ ...roleAssignmentForm, role_code: e.target.value, site_codes: [], site_code: e.target.value === 'admin' ? '*' : site })}>{roleData.roles.map((r) => <option key={r.role_code} value={r.role_code}>{r.role_name}</option>)}</select></Field>
             <Field label="Assigned site(s)" hint="Select one or more sites. All sites is only available for Admin."><select multiple size={Math.min(6, Math.max(3, siteOptions.length))} value={roleAssignmentForm.site_codes.length ? roleAssignmentForm.site_codes : [roleAssignmentForm.site_code || site]} onChange={(e) => { const selected = Array.from(e.target.selectedOptions).map((o) => o.value); setRoleAssignmentForm({ ...roleAssignmentForm, site_codes: selected, site_code: selected[0] || '' }); }} required>{(isAdmin && roleAssignmentForm.role_code === 'admin' ? ['*'] : siteOptions).map((s) => <option key={s} value={s}>{s === '*' ? 'All sites' : s}</option>)}</select></Field>
             <div className="ol-form-actions"><Button type="submit" disabled={busy || !roleAssignmentForm.user_id}>Assign role to selected sites</Button></div>
           </form>
@@ -843,7 +842,7 @@ export default function OperationsLiveWorkspace() {
             {stoScans.map((scan, index) => <div className="ol-sto-scan-item" key={`${scan}:${index}`}><span>{index + 1}. {scan}</span><button type="button" onClick={() => setStoScans((rows) => rows.filter((_, i) => i !== index))}>Remove</button></div>)}
             {!stoScans.length && <small>No devices added yet. Each barcode must be unique and reconciled at this source site.</small>}
           </div>
-          <div className="ol-form-actions"><Button type="button" disabled={busy || !stoForm.to_site_code || !stoScans.length} onClick={() => createAndDispatchSto({ preventDefault: () => {} })}>Create STO & dispatch {stoScans.length ? `(${stoScans.length})` : ''}</Button></div>
+          <div className="ol-form-actions"><Button type="button" disabled={busy || !stoForm.to_site_code || !stoScans.length} onClick={createAndDispatchSto}>Create STO & dispatch {stoScans.length ? `(${stoScans.length})` : ''}</Button></div>
           <div className="ol-form-note">The backend validates every serial/IMEI, source site, ownership, stock state, condition, assignments and open transfers in one transaction.</div>
         </Panel>}
         {(can('sto', 'receive')) && <Panel title="Receive HHD against an STO" subtitle="Scan each physical HHD at the destination. Partial receipts are supported.">
