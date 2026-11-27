@@ -829,33 +829,36 @@ export default function OperationsLiveWorkspace() {
 
 
       {page === 'sto' && <>
-        {(can('sto', 'create') && can('sto', 'dispatch')) && <Panel title="Create & dispatch Stock Transfer Order" subtitle={`Scan each HHD at the source site. Dispatch is recorded against the canonical Serial and IMEI.`}>
+        {can('sto', 'create') && <Panel title="Create STO request to Site IT" subtitle="The request stays in Operations inventory until a Custodian or Allocator approves it. Asset Manager dispatches only after approval.">
           <form className="ol-form-grid" onSubmit={addStoScan}>
             <Field label="Source site"><input value={site} disabled/></Field>
-            <Field label="Destination site"><select value={stoForm.to_site_code} onChange={(e) => setStoForm({ ...stoForm, to_site_code: e.target.value })} required><option value="">Select destination</option>{siteOptions.filter((s) => s !== site).map((s) => <option key={s} value={s}>{s}</option>)}</select></Field>
+            <Field label="Destination site"><select value={stoForm.to_site_code} onChange={(e) => setStoForm({ ...stoForm, to_site_code: e.target.value })} required><option value="">Select destination site</option>{siteOptions.map((s) => <option key={s} value={s}>{s}{s === site ? ' · Same-site Site IT' : ''}</option>)}</select></Field>
+            <Field label="Receiving department"><select value={stoForm.to_department} onChange={(e) => setStoForm({ ...stoForm, to_department: e.target.value })}><option value="it">Site IT (approval required)</option><option value="operations">Operations</option><option value="superstore">Superstore</option></select></Field>
             <Field label="Scan HHD Serial / IMEI"><ScanInput value={stoForm.scan_value} onChange={(value) => setStoForm((x) => ({ ...x, scan_value: value }))} required placeholder="Scan device barcode"/></Field>
-            <Field label="Dispatch notes"><input value={stoForm.notes} onChange={(e) => setStoForm({ ...stoForm, notes: e.target.value })} placeholder="Reason / reference / vehicle details"/></Field>
+            <Field label="Request remarks"><input value={stoForm.notes} onChange={(e) => setStoForm({ ...stoForm, notes: e.target.value })} placeholder="Reason / reference / business justification"/></Field>
             <div className="ol-form-actions"><Button type="submit" tone="secondary" disabled={busy || !stoForm.scan_value.trim()}>Add scanned device</Button></div>
           </form>
           <div className="ol-sto-scan-list">
-            <div className="ol-sto-scan-heading"><strong>Scanned devices</strong><Pill tone="info">{stoScans.length} HHD(s)</Pill></div>
+            <div className="ol-sto-scan-heading"><strong>Devices in request</strong><Pill tone="info">{stoScans.length} HHD(s)</Pill></div>
             {stoScans.map((scan, index) => <div className="ol-sto-scan-item" key={`${scan}:${index}`}><span>{index + 1}. {scan}</span><button type="button" onClick={() => setStoScans((rows) => rows.filter((_, i) => i !== index))}>Remove</button></div>)}
-            {!stoScans.length && <small>No devices added yet. Each barcode must be unique and reconciled at this source site.</small>}
+            {!stoScans.length && <small>No HHDs added. Only unheld Good + Working Operations stock can be requested.</small>}
           </div>
-          <div className="ol-form-actions"><Button type="button" disabled={busy || !stoForm.to_site_code || !stoScans.length} onClick={createAndDispatchSto}>Create STO & dispatch {stoScans.length ? `(${stoScans.length})` : ''}</Button></div>
-          <div className="ol-form-note">The backend validates every serial/IMEI, source site, ownership, stock state, condition, assignments and open transfers in one transaction.</div>
+          <div className="ol-form-actions"><Button type="button" disabled={busy || !stoForm.to_site_code || !stoScans.length} onClick={createStoRequest}>Create STO request {stoScans.length ? `(${stoScans.length})` : ''}</Button></div>
+          <div className="ol-form-note">For Site IT transfers, the Custodian responsible for all included devices or the site Allocator must approve. Request creation does not dispatch or change stock custody.</div>
         </Panel>}
-        {(can('sto', 'receive')) && <Panel title="Receive HHD against an STO" subtitle="Scan each physical HHD at the destination. Partial receipts are supported.">
+
+        {can('sto', 'receive') && <Panel title="Receive HHD against an approved STO" subtitle="Site IT receives only dispatched devices. The receiving department is fixed in the approved STO.">
           <form className="ol-form-grid" onSubmit={receiveStoDevice}>
-            <Field label="Incoming STO"><select value={stoReceiveForm.sto_id} onChange={(e) => setStoReceiveForm({ ...stoReceiveForm, sto_id: e.target.value })} required><option value="">Select open incoming STO</option>{stoRows.filter((r) => r.to_site_code === site && ['dispatched','partially_received'].includes(r.status)).map((r) => <option key={r.id} value={r.id}>{r.sto_number} · {r.received_count}/{r.device_count} received · From {r.from_site_code}</option>)}</select></Field>
+            <Field label="Incoming STO"><select value={stoReceiveForm.sto_id} onChange={(e) => setStoReceiveForm({ ...stoReceiveForm, sto_id: e.target.value })} required><option value="">Select open incoming STO</option>{stoRows.filter((r) => r.to_site_code === site && ['dispatched','partially_received'].includes(r.status)).map((r) => <option key={r.id} value={r.id}>{r.sto_number} · {r.received_count}/{r.device_count} received · {human(r.to_department)}</option>)}</select></Field>
             <Field label="Scan received HHD Serial / IMEI"><ScanInput value={stoReceiveForm.scan_value} onChange={(value) => setStoReceiveForm((x) => ({ ...x, scan_value: value }))} required placeholder="Scan physical HHD barcode"/></Field>
-            <Field label="Receiving department"><select value={stoReceiveForm.department} onChange={(e) => setStoReceiveForm({ ...stoReceiveForm, department: e.target.value })}><option value="operations">Operations</option><option value="it">IT</option><option value="superstore">Superstore</option></select></Field>
-            <Field label="Receipt notes"><input value={stoReceiveForm.notes} onChange={(e) => setStoReceiveForm({ ...stoReceiveForm, notes: e.target.value })}/></Field>
+            <Field label="Receiving department fixed by STO"><input value={human(selectedIncomingSto?.to_department || '')} disabled placeholder="Select the incoming STO"/></Field>
+            <Field label="Receipt remarks"><input value={stoReceiveForm.notes} onChange={(e) => setStoReceiveForm({ ...stoReceiveForm, notes: e.target.value })}/></Field>
             <div className="ol-form-actions"><Button type="submit" disabled={busy || !stoReceiveForm.sto_id || !stoReceiveForm.scan_value.trim()}>Confirm scanned receipt</Button></div>
           </form>
         </Panel>}
-        <Panel title="Stock transfer register" subtitle="Dispatch and receipt status across the active site.">
-          <div className="ol-simple-table"><table><thead><tr><th>STO number</th><th>From</th><th>To</th><th>Status</th><th>Devices</th><th>Received</th><th>Dispatched</th></tr></thead><tbody>{stoRows.map((r) => <tr key={r.id}><td className="ol-mono">{r.sto_number}</td><td>{r.from_site_code}</td><td>{r.to_site_code}</td><td><Pill tone={r.status === 'received' ? 'success' : r.status === 'cancelled' ? 'danger' : 'warning'}>{human(r.status)}</Pill></td><td>{r.device_count}</td><td>{r.received_count}</td><td>{when(r.dispatched_at)}</td></tr>)}</tbody></table>{!stoRows.length && <Empty title="No STO records" detail="Created and incoming Stock Transfer Orders will appear here."/>}</div>
+
+        <Panel title="Stock transfer register" subtitle="Request, approval, dispatch and receipt are tracked as separate stages.">
+          <div className="ol-simple-table"><table><thead><tr><th>STO number</th><th>From</th><th>To</th><th>Status</th><th>Approver</th><th>Devices</th><th>Received</th><th>Actions</th></tr></thead><tbody>{stoRows.map((r) => <tr key={r.id}><td className="ol-mono">{r.sto_number}<small>{when(r.created_at)}</small></td><td>{r.from_site_code} · {human(r.from_department)}</td><td>{r.to_site_code} · {human(r.to_department)}</td><td><Pill tone={r.status === 'received' || r.status === 'approved' ? 'success' : r.status === 'rejected' || r.status === 'cancelled' ? 'danger' : 'warning'}>{human(r.status)}</Pill></td><td>{r.approved_by_name || (r.approval_required ? 'Awaiting approval' : 'Not required')}{r.approval_role_code && <small>{roleName(r.approval_role_code)}</small>}</td><td>{r.device_count}</td><td>{r.received_count}</td><td><div className="ol-actions-inline">{can('sto', 'approve') && r.status === 'pending_approval' && <><Button tone="secondary" onClick={() => approveStoRequest(r)}>Approve</Button><Button tone="danger" onClick={() => rejectStoRequest(r)}>Reject</Button></>}{can('sto', 'dispatch') && r.status === 'approved' && <Button onClick={() => dispatchStoRequest(r)}>Dispatch</Button>}</div></td></tr>)}</tbody></table>{!stoRows.length && <Empty title="No STO records" detail="Requested, approved and incoming Stock Transfer Orders will appear here."/>}</div>
         </Panel>
       </>}
 
