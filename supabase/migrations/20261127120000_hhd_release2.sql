@@ -690,6 +690,14 @@ begin
 end;
 $hhd$;
 
+revoke all on function public.hhd_list_allocatable_employees(text) from public, anon;
+revoke all on function public.hhd_admin_list_onroll_employees(text) from public, anon;
+revoke all on function public.hhd_admin_assign_role_sites(uuid,text,text[]) from public, anon;
+revoke all on function public.hhd_sto_create_dispatch(text,text,text[],text) from public, anon;
+revoke all on function public.hhd_sto_receive_device(uuid,text,text,text) from public, anon;
+revoke all on function public.hhd_sto_list(text,integer) from public, anon;
+revoke all on function public.hhd_list_device_movement_ledger(text,text,integer) from public, anon;
+
 grant execute on function public.hhd_list_allocatable_employees(text) to authenticated;
 grant execute on function public.hhd_admin_list_onroll_employees(text) to authenticated;
 grant execute on function public.hhd_admin_assign_role_sites(uuid,text,text[]) to authenticated;
