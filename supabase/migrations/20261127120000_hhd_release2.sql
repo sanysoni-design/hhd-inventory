@@ -636,7 +636,7 @@ language plpgsql
 stable
 security definer
 set search_path = public, auth, pg_temp
-as $
+as $hhd$
 declare
   v_scope text;
   v_rows jsonb;
@@ -673,7 +673,7 @@ begin
   ) x;
   return v_rows;
 end;
-$;
+$hhd$;
 
 grant execute on function public.hhd_list_allocatable_employees(text) to authenticated;
 grant execute on function public.hhd_admin_list_onroll_employees(text) to authenticated;
