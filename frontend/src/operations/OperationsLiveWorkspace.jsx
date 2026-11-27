@@ -389,13 +389,11 @@ export default function OperationsLiveWorkspace() {
     e.preventDefault();
     if (!selectedEmployee) return flash('Select an active on-roll employee at this site.', 'error');
     try {
-      const existing = allocations.find((a) => a.employee_id === selectedEmployee.employee_id && a.process?.toLowerCase() === allocationForm.process.trim().toLowerCase() && a.status === 'active');
-      const result = await operationsApi.createOrAdjustAllocation({
+      const result = await operationsApi.addAllocationQuantity({
         site_code: site, employee_id: selectedEmployee.employee_id, process: allocationForm.process.trim(),
-        authorized_quantity: Number(allocationForm.quantity), reason: allocationForm.reason,
-        expected_version: existing?.version ?? null,
+        additional_quantity: Number(allocationForm.quantity), reason: allocationForm.reason,
       });
-      flash(`Allocation saved. ${result.pending_quantity} device collection(s) pending.`);
+      flash(`Added ${result.additional_quantity} HHD(s). Cumulative authorization: ${result.authorized_quantity}; pending virtual mapping: ${result.pending_quantity}.`);
       setAllocationForm({ employee_id: '', process: '', quantity: 1, reason: '' });
       await loadSiteData(site);
     } catch (e2) { flash(e2.message || 'Allocation could not be saved.', 'error'); }
@@ -406,7 +404,7 @@ export default function OperationsLiveWorkspace() {
     if (!activeAllocation) return flash('No active employee allocation found.', 'error');
     try {
       const result = await operationsApi.scanAssignDevice(site, activeAllocation.id, scanForm.scan_value.trim());
-      flash(`${result.serial} assigned to ${result.employee_id}. ${result.pending_quantity} collection(s) remaining.`);
+      flash(`${result.serial} mapped virtually to custodian ${result.employee_id}. Physical stock remains in Operations. ${result.pending_quantity} mapping(s) remain.`);
       setScanForm((x) => ({ ...x, scan_value: '' }));
       await loadSiteData(site);
     } catch (e2) { flash(e2.message || 'Device assignment failed.', 'error'); }
@@ -420,10 +418,10 @@ export default function OperationsLiveWorkspace() {
     const map = (v, allowed) => allowed.find((x) => x.toLowerCase() === v.trim().toLowerCase());
     const p = map(physical, ['good', 'damaged']); const f = map(functional, ['working', 'not_working']);
     if (!p || !f) return flash('Condition not recognized. Use Good/Damaged and Working/Not Working.', 'error');
-    const notes = window.prompt('Return note (optional)', '') || '';
+    const notes = window.prompt('Reason / remarks for releasing virtual custodian responsibility (optional)', '') || '';
     try {
       const result = await operationsApi.returnAssignedDevice(serial, p, f, notes);
-      flash(`${serial} returned. New stock state: ${result.stock_state}.`);
+      flash(`${serial} released from virtual custodian responsibility. Operations stock state: ${result.stock_state}.`);
       await loadSiteData(site);
     } catch (e) { flash(e.message || 'Device return failed.', 'error'); }
   };
@@ -522,27 +520,59 @@ export default function OperationsLiveWorkspace() {
     setStoForm((x) => ({ ...x, scan_value: '' }));
   };
 
-  const createAndDispatchSto = async () => {
+  const createStoRequest = async () => {
     if (!stoForm.to_site_code) return flash('Select a destination site.', 'error');
-    if (!stoScans.length) return flash('Scan at least one HHD before dispatch.', 'error');
+    if (!stoForm.to_department) return flash('Select the receiving department.', 'error');
+    if (!stoScans.length) return flash('Scan at least one HHD before creating the STO request.', 'error');
     try {
-      const result = await operationsApi.createAndDispatchSto(site, stoForm.to_site_code, stoScans, stoForm.notes);
-      flash(`${result.sto_number} dispatched with ${result.device_count} HHD(s).`);
+      const result = await operationsApi.createStoRequest(site, stoForm.to_site_code, stoForm.to_department, stoScans, stoForm.notes);
+      flash(result.status === 'pending_approval'
+        ? `${result.sto_number} created. Custodian or Allocator approval is pending; no device has been dispatched.`
+        : `${result.sto_number} request created and approved for dispatch.`);
       setStoScans([]);
-      setStoForm({ to_site_code: '', scan_value: '', notes: '' });
+      setStoForm({ to_site_code: site, to_department: 'it', scan_value: '', notes: '' });
+      await loadSiteData(site);
+    } catch (e2) { flash(e2.message || 'STO request could not be created.', 'error'); }
+  };
+
+  const approveStoRequest = async (row) => {
+    const notes = window.prompt(`Approval remarks for ${row.sto_number} (optional):`, '') || '';
+    try {
+      await operationsApi.approveSto(row.id, notes);
+      flash(`${row.sto_number} approved. Asset Manager can now dispatch it.`);
+      await loadSiteData(site);
+    } catch (e2) { flash(e2.message || 'STO approval failed.', 'error'); }
+  };
+
+  const rejectStoRequest = async (row) => {
+    const reason = window.prompt(`Reason for rejecting ${row.sto_number}:`, '');
+    if (!reason || !reason.trim()) return;
+    try {
+      await operationsApi.rejectSto(row.id, reason.trim());
+      flash(`${row.sto_number} rejected. Stock remains in Operations.`);
+      await loadSiteData(site);
+    } catch (e2) { flash(e2.message || 'STO rejection failed.', 'error'); }
+  };
+
+  const dispatchStoRequest = async (row) => {
+    const notes = window.prompt(`Dispatch remarks for ${row.sto_number} (optional):`, '') || '';
+    try {
+      await operationsApi.dispatchSto(row.id, notes);
+      flash(`${row.sto_number} physically dispatched to ${human(row.to_department)}.`);
       await loadSiteData(site);
     } catch (e2) { flash(e2.message || 'STO dispatch failed.', 'error'); }
   };
 
+  const selectedIncomingSto = stoRows.find((r) => r.id === stoReceiveForm.sto_id);
   const receiveStoDevice = async (e) => {
     e.preventDefault();
-    if (!stoReceiveForm.sto_id || !stoReceiveForm.scan_value.trim()) return flash('Select an open STO and scan its HHD.', 'error');
+    if (!selectedIncomingSto || !stoReceiveForm.scan_value.trim()) return flash('Select an incoming dispatched STO and scan its HHD.', 'error');
     try {
       const result = await operationsApi.receiveStoDevice(
         stoReceiveForm.sto_id, stoReceiveForm.scan_value.trim(),
-        stoReceiveForm.department, stoReceiveForm.notes,
+        selectedIncomingSto.to_department, stoReceiveForm.notes,
       );
-      flash(`${result.device_serial} received against ${result.sto_number}. ${result.remaining_devices} device(s) pending.`);
+      flash(`${result.device_serial} received into ${human(result.to_department)} against ${result.sto_number}. ${result.remaining_devices} device(s) pending.`);
       setStoReceiveForm((x) => ({ ...x, scan_value: '', notes: '' }));
       await loadSiteData(site);
     } catch (e2) { flash(e2.message || 'STO receipt failed.', 'error'); }
@@ -551,15 +581,16 @@ export default function OperationsLiveWorkspace() {
   const nav = useMemo(() => {
     const items = [{ id: 'overview', label: 'Overview', icon: LayoutDashboard }, { id: 'account', label: 'Account & Password', icon: LockKeyhole }];
     if (can('inventory', 'view')) items.push({ id: 'inventory', label: 'Inventory', icon: Boxes });
-    if (can('distribution', 'view') || can('distribution', 'create') || can('employee_collection', 'view')) items.push({ id: 'allocations', label: 'Quantity allocations', icon: ListChecks });
-    if (can('employee_collection', 'view') || can('employee_collection', 'scan_assign')) items.push({ id: 'my-devices', label: 'My devices & collection', icon: Smartphone });
+    if (can('distribution', 'view') || can('distribution', 'create') || can('distribution', 'assign_device') || can('employee_collection', 'view')) items.push({ id: 'allocations', label: 'Custodian allocations', icon: ListChecks });
+    if (can('employee_collection', 'view')) items.push({ id: 'my-devices', label: 'My virtual responsibilities', icon: Smartphone });
+    if (can('inventory', 'condition_history')) items.push({ id: 'condition-dashboard', label: 'Condition dashboard', icon: Activity });
     if (can('hoto', 'view') || can('hoto', 'create')) items.push({ id: 'hoto', label: 'Shift HOTO', icon: ArrowLeftRight });
     if (can('admin_employees', 'view')) items.push({ id: 'employees', label: 'On-roll employees', icon: Users });
     if (can('admin_users', 'view') || can('admin_users', 'create')) items.push({ id: 'users', label: 'Users & IDs', icon: UserRoundPlus });
     if (can('admin_roles', 'view')) items.push({ id: 'roles', label: 'Roles & permissions', icon: ShieldCheck });
     if (can('offroll_workers', 'view') || can('offroll_workers', 'sync')) items.push({ id: 'hr', label: 'HR TL/GC master', icon: FileClock });
     if (can('inventory', 'reconcile')) items.push({ id: 'reconcile', label: 'Opening stock reconciliation', icon: Wrench });
-    if (can('sto', 'view') || can('sto', 'create') || can('sto', 'dispatch') || can('sto', 'receive')) items.push({ id: 'sto', label: 'STO workflow', icon: Package });
+    if (can('sto', 'view') || can('sto', 'create') || can('sto', 'dispatch') || can('sto', 'receive') || can('sto', 'approve')) items.push({ id: 'sto', label: 'STO workflow', icon: Package });
     if (can('inventory', 'view') || can('admin_audit', 'view')) items.push({ id: 'movement', label: 'IMEI movement ledger', icon: Activity });
     return items;
   }, [can]);
@@ -567,6 +598,7 @@ export default function OperationsLiveWorkspace() {
   useEffect(() => { if (!nav.some((n) => n.id === page)) setPage('overview'); }, [nav, page]);
 
   const filteredAllocations = allocations.filter((a) => `${a.employee_name} ${a.employee_id} ${a.process} ${a.id}`.toLowerCase().includes(search.toLowerCase()));
+  const maxWeeklyChanges = Math.max(1, ...((conditionDashboard?.weekly || []).map((w) => Number(w.total_changes) || 0)));
   const summary = workspace?.summary || {};
   const primaryRoleName = roleName(primaryRole || roleAssignments[0]?.role_code);
 
