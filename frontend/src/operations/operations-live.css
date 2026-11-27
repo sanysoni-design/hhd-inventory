@@ -13,3 +13,16 @@
 @media(max-width:700px){.ol-account-summary{grid-template-columns:1fr}.ol-scan-row{grid-template-columns:1fr}.ol-sto-scan-item{align-items:flex-start}.ol-actions-inline .ol-button{padding:6px 8px;font-size:10px}}
 
 .ol-change-detail{max-width:390px;min-width:180px;white-space:normal;line-height:1.45;font-size:10px;color:#64748b;overflow-wrap:anywhere}
+
+/* Custody model and weekly condition dashboard */
+.ol-condition-toolbar{display:grid;grid-template-columns:minmax(160px,.65fr) minmax(220px,1.35fr) auto;gap:12px;align-items:end;margin-bottom:15px}
+.ol-weekly-list{display:grid;gap:15px}
+.ol-weekly-row{display:grid;gap:6px;padding:2px 0 12px;border-bottom:1px solid #edf1f6}
+.ol-weekly-row:last-child{border-bottom:0;padding-bottom:0}
+.ol-weekly-meta{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.ol-weekly-meta strong{font-size:11px;color:#31445b}
+.ol-weekly-meta span{font-size:10px;font-weight:750;color:#43536a}
+.ol-weekly-track{height:9px;background:#edf2f7;border-radius:999px;overflow:hidden}
+.ol-weekly-track span{display:block;height:100%;min-width:4px;background:linear-gradient(90deg,#0d8b83,#62c9bf);border-radius:999px}
+.ol-weekly-row>small{font-size:10px;color:#8794a5}
+@media(max-width:700px){.ol-condition-toolbar{grid-template-columns:1fr}.ol-condition-toolbar>.ol-button{width:100%}}
