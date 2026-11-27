@@ -249,7 +249,7 @@ begin
 
   return jsonb_build_object(
     'valid',true,'requires_swap',false,
-    'device',jsonb_build_object('serial',v_serial,'imei',v_device.imei_number,'make',v_device."Make",'model',v_device."Model','physical_condition',v_pos.physical_condition,'functional_condition',v_pos.functional_condition,'primary_employee_id',v_assignment.employee_id),
+    'device',jsonb_build_object('serial',v_serial,'imei',v_device.imei_number,'make',v_device."Make",'model',v_device."Model",'physical_condition',v_pos.physical_condition,'functional_condition',v_pos.functional_condition,'primary_employee_id',v_assignment.employee_id),
     'current_holder',case when v_holder_type is null then null else jsonb_build_object('holder_type',v_holder_type,'employee_id',v_pos.current_holder_employee_id,'employee_name',coalesce(v_holder_name,v_pos.current_holder_employee_id),'worker_type',v_worker_type) end
   );
 end;
