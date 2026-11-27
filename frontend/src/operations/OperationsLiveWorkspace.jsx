@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, AlertTriangle, ArrowLeftRight, BadgeCheck, Boxes, Building2, CheckCircle2,
   ChevronRight, Clock3, Download, FileClock, LayoutDashboard, ListChecks, LockKeyhole,
@@ -25,6 +25,84 @@ function Field({ label, children, hint }) {
 function Panel({ title, subtitle, action, children, className = '' }) {
   return <section className={`ol-panel ${className}`}><header className="ol-panel-head"><div><h3>{title}</h3>{subtitle && <p>{subtitle}</p>}</div>{action}</header>{children}</section>;
 }
+
+const ROLE_LABELS = {
+  site_lead: 'Allocator',
+  assigned_employee: 'Custodian',
+  operations_spoc: 'Asset Manager',
+};
+const roleName = (value) => ROLE_LABELS[value] || human(value);
+
+function ScanInput({ value, onChange, placeholder = 'Scan barcode or type value', required = false, listId, listOptions = [] }) {
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (!cameraOpen) return undefined;
+    let active = true;
+    let stream = null;
+    let frame = null;
+
+    const close = () => {
+      if (frame) cancelAnimationFrame(frame);
+      if (stream) stream.getTracks().forEach((track) => track.stop());
+      if (videoRef.current) videoRef.current.srcObject = null;
+    };
+
+    const start = async () => {
+      try {
+        if (!('BarcodeDetector' in window)) throw new Error('Camera scanning is not supported in this browser. Use a USB/Bluetooth barcode scanner or type the value.');
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access requires a secure HTTPS connection.');
+        const detector = new window.BarcodeDetector({
+          formats: ['code_128', 'code_39', 'ean_13', 'ean_8', 'qr_code', 'upc_a', 'upc_e', 'itf'],
+        });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        if (!active) { stream.getTracks().forEach((track) => track.stop()); return; }
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+        const scan = async () => {
+          if (!active || !videoRef.current) return;
+          try {
+            const found = await detector.detect(videoRef.current);
+            if (found?.length && found[0]?.rawValue) {
+              onChange(found[0].rawValue);
+              setCameraOpen(false);
+              return;
+            }
+          } catch (scanError) {
+            setCameraError(scanError.message || 'Unable to read this barcode.');
+          }
+          if (active) frame = requestAnimationFrame(scan);
+        };
+        scan();
+      } catch (scanError) {
+        setCameraError(scanError.message || 'Camera could not be started.');
+        setCameraOpen(false);
+      }
+    };
+
+    start();
+    return () => { active = false; close(); };
+  }, [cameraOpen, onChange]);
+
+  return (
+    <div className="ol-scan-control">
+      <div className="ol-scan-input-wrap">
+        <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+          autoComplete="off" required={required} list={listId}/>
+        <button type="button" className="ol-scan-camera-btn" onClick={() => { setCameraError(''); setCameraOpen((v) => !v); }}
+          title={cameraOpen ? 'Close camera scanner' : 'Open camera scanner'}><ScanLine size={17}/></button>
+      </div>
+      {listId && <datalist id={listId}>{listOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</datalist>}
+      {cameraOpen && <div className="ol-camera-panel"><video ref={videoRef} muted playsInline/><small>Align the barcode inside the camera frame</small><button type="button" onClick={() => setCameraOpen(false)}>Close scanner</button></div>}
+      {cameraError && <small className="ol-scan-error">{cameraError}</small>}
+    </div>
+  );
+}
+
 function Pill({ children, tone = 'neutral' }) { return <span className={`ol-pill ol-pill-${tone}`}>{children}</span>; }
 function Metric({ title, value, note, icon: Icon, tone = 'blue' }) {
   return <div className="ol-metric"><div className={`ol-metric-icon ol-metric-${tone}`}><Icon size={18}/></div><span>{title}</span><strong>{value}</strong><small>{note}</small></div>;
@@ -47,11 +125,23 @@ export default function OperationsLiveWorkspace() {
   const [roleData, setRoleData] = useState({ roles: [], permissions: [], role_permissions: [] });
   const [hrRuns, setHrRuns] = useState([]);
   const [auditRows, setAuditRows] = useState([]);
+  const [movementRows, setMovementRows] = useState([]);
+  const [stoRows, setStoRows] = useState([]);
+  const [stoScans, setStoScans] = useState([]);
+  const [stoForm, setStoForm] = useState({ to_site_code: '', scan_value: '', notes: '' });
+  const [stoReceiveForm, setStoReceiveForm] = useState({ sto_id: '', scan_value: '', department: 'operations', notes: '' });
+  const [editingUser, setEditingUser] = useState(null);
+  const [editUserForm, setEditUserForm] = useState({ user_id: '', full_name: '', email: '', login_id: '', employee_id: '', designation: '', process: '', password: '' });
+  const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' });
+  const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
+
   const [busy, setBusy] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [creatingUserPassword, setCreatingUserPassword] = useState('');
+  const [creatingUserPasswordConfirm, setCreatingUserPasswordConfirm] = useState('');
   const [inviteMode, setInviteMode] = useState(false);
   const [invitePassword, setInvitePassword] = useState('');
   const [invitePasswordConfirm, setInvitePasswordConfirm] = useState('');
@@ -60,10 +150,10 @@ export default function OperationsLiveWorkspace() {
   const [scanForm, setScanForm] = useState({ allocation_id: '', scan_value: '' });
   const [hotoForm, setHotoForm] = useState({ serial: '', worker_id: '', shift: 'A', date: new Date().toISOString().slice(0, 10), type: 'handover', physical: 'good', functional: 'working', notes: '' });
   const [hotoReturnForm, setHotoReturnForm] = useState({ serial: '', physical: 'good', functional: 'working', shift: 'A', date: new Date().toISOString().slice(0, 10), notes: '' });
-  const [userForm, setUserForm] = useState({ email: '', login_id: '', employee_id: '', full_name: '', role_code: 'assigned_employee', site_code: '', designation: 'Lead', process: '' });
+  const [userForm, setUserForm] = useState({ email: '', login_id: '', employee_id: '', full_name: '', role_code: 'assigned_employee', site_code: '', site_codes: [], designation: 'Lead', process: '', password: '' });
   const [roleForm, setRoleForm] = useState({ role_name: '', role_code: '', description: '', scope_type: 'assigned_sites' });
   const [selectedRole, setSelectedRole] = useState('site_lead');
-  const [roleAssignmentForm, setRoleAssignmentForm] = useState({ user_id: '', role_code: 'assigned_employee', site_code: '' });
+  const [roleAssignmentForm, setRoleAssignmentForm] = useState({ user_id: '', role_code: 'assigned_employee', site_code: '', site_codes: [] });
   const [employeeForm, setEmployeeForm] = useState({ employee_id: '', employee_name: '', site_code: '', designation: 'Lead', process: '', email: '', employment_status: 'active' });
   const [reconcileForm, setReconcileForm] = useState({ device_serial: '', site_code: '', owner_department: 'operations', stock_state: 'available', physical_condition: 'good', functional_condition: 'working', reason: '' });
 
