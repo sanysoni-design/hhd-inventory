@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, ArrowRight, AlertTriangle, BadgeCheck, Building2, Camera, CheckCircle2,
-  ChevronRight, ClipboardCheck, Package, RefreshCw, ScanLine, ShieldAlert, UserRound,
+  ChevronRight, Package, RefreshCw, ScanLine, ShieldAlert, UserRound,
 } from 'lucide-react';
 import { operationsApi } from './operationsApi.js';
 import './hoto-wizard.css';
@@ -220,7 +220,7 @@ export default function HotoWizard({ site, onComplete }) {
     setBusy(true);
     clearMessages();
     try {
-      const result = await operationsApi.validateHotoWorker(employeeId, site);
+      const result = await operationsApi.validateHotoWorker(employeeId, site, target ? 'mid_shift_swap' : 'handover');
       if (result?.valid && result?.available) {
         const candidate = { ...result.worker, manual_override: false };
         if (target) {
