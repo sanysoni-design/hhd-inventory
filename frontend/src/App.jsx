@@ -156,12 +156,16 @@ function LegacyApp() {
   return <Main url={url} setUrl={setUrl} auth={auth} logout={logout} />;
 }
 
+import OverviewDashboardPreview from './operations/OverviewDashboardPreview.jsx';
+
 // Production defaults to the current Operations workspace.
 // Keep the previous inventory interface available explicitly for rollback via ?legacy=1.
 export default function App() {
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const overviewPreview = params.get('overview-preview') === '1';
   const legacy = params.get('legacy') === '1';
   const preview = params.get('ops-ui') === 'preview';
+  if (overviewPreview) return <OverviewDashboardPreview />;
   if (legacy) return <LegacyApp />;
   if (preview) return <OperationsWorkspace />;
   return <OperationsLiveWorkspace />;
