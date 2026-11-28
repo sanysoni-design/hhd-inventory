@@ -224,7 +224,6 @@ export default function OverviewDashboardPreview() {
   const distributionTotal = distribution.reduce((a, x) => a + x.value, 0);
 
   const trendDesc = period === '7d' ? 'Daily HOTO and asset movement events' : period === '30d' ? 'Weekly HOTO and STO movement events' : 'Monthly movement trend';
-  const siteRows = siteRowsPlaceholder(scopedSites, siteSearch);
   const activeProcesses = processRows.map((r) => ({ ...r, gc: shift === 'all' ? r.gc : Math.round(r.gc * (shift === 'A' ? 0.36 : shift === 'B' ? 0.34 : 0.30)), tl: shift === 'all' ? r.tl : Math.round(r.tl * (shift === 'A' ? 0.36 : shift === 'B' ? 0.34 : 0.30)) }));
 
   return (
@@ -364,6 +363,3 @@ export default function OverviewDashboardPreview() {
   );
 }
 
-function siteRowsPlaceholder(rows, search) {
-  return rows.filter((s) => !search || s.site.toLowerCase().includes(search.toLowerCase()));
-}
