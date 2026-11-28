@@ -1,9 +1,8 @@
 import { useMemo, useState } from 'react';
 import {
-  Activity, AlertTriangle, ArrowDownLeft, ArrowRight, ArrowUpRight, BadgeCheck, Boxes,
-  Building2, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, CircleHelp,
-  Clock3, FileClock, Filter, HardDrive, LayoutDashboard, MapPin, Package, RefreshCw,
-  Search, ShieldCheck, Smartphone, Truck, Users, UserRound, Wrench, X,
+  Activity, AlertTriangle, BadgeCheck, Boxes, ChevronRight, CircleHelp, Clock3,
+  HardDrive, LayoutDashboard, Package, RefreshCw, Search, ShieldCheck, Smartphone,
+  Truck, Users, UserRound, Wrench, X,
 } from 'lucide-react';
 import './overview-preview.css';
 
@@ -41,11 +40,11 @@ const PROCESS_ROWS = [
 ];
 
 const MY_DEVICES = [
-  { serial: 'HHD-01842', holder: 'R. Kumar', type: 'GC', process: 'Inbound', shift: 'A', physical: 'Good', functional: 'Working', state: 'With GC', last: '13:42' },
-  { serial: 'HHD-01877', holder: 'A. Singh', type: 'TL', process: 'Outbound', shift: 'B', physical: 'Good', functional: 'Working', state: 'With TL', last: '12:58' },
-  { serial: 'HHD-01901', holder: 'S. Yadav', type: 'GC', process: 'Sortation', shift: 'A', physical: 'Damaged', functional: 'Working', state: 'With GC', last: '12:31' },
-  { serial: 'HHD-01916', holder: 'M. Das', type: 'GC', process: 'Inbound', shift: 'C', physical: 'Good', functional: 'Working', state: 'With GC', last: '11:46' },
-  { serial: 'HHD-01940', holder: 'P. Verma', type: 'TL', process: 'Returns', shift: 'B', physical: 'Good', functional: 'Working', state: 'HOTO due', last: '10:22' },
+  { serial: 'HHD-01842', holder: 'R. Kumar', type: 'GC', process: 'Inbound', shift: 'A', model: 'tc22', physical: 'Good', functional: 'Working', state: 'With GC', last: '13:42' },
+  { serial: 'HHD-01877', holder: 'A. Singh', type: 'TL', process: 'Outbound', shift: 'B', model: 'ct45', physical: 'Good', functional: 'Working', state: 'With TL', last: '12:58' },
+  { serial: 'HHD-01901', holder: 'S. Yadav', type: 'GC', process: 'Sortation', shift: 'A', model: 'tc26', physical: 'Damaged', functional: 'Working', state: 'With GC', last: '12:31' },
+  { serial: 'HHD-01916', holder: 'M. Das', type: 'GC', process: 'Inbound', shift: 'C', model: 'tc22', physical: 'Good', functional: 'Working', state: 'With GC', last: '11:46' },
+  { serial: 'HHD-01940', holder: 'P. Verma', type: 'TL', process: 'Returns', shift: 'B', model: 'ct45', physical: 'Good', functional: 'Working', state: 'HOTO due', last: '10:22' },
 ];
 
 const IT_STOS = [
@@ -129,7 +128,8 @@ export default function OverviewDashboardPreview() {
   const conditionFactor = condition === 'good' ? 0.91 : condition === 'damaged' ? 0.06 : condition === 'notworking' ? 0.03 : 1;
   const filteredFactor = modelFactor * conditionFactor;
   const inventoryTotal = Math.round((totals.total || 0) * filteredFactor);
-  const filteredOnGround = Math.round(onGround * filteredFactor);
+  const processFactor = process === 'inbound' ? 0.36 : process === 'outbound' ? 0.31 : process === 'sortation' ? 0.24 : process === 'returns' ? 0.09 : 1;
+  const filteredOnGround = Math.round(onGround * filteredFactor * processFactor);
   const filteredOps = Math.round((totals.ops || 0) * filteredFactor);
   const filteredIT = Math.round((totals.it || 0) * filteredFactor);
   const filteredQuarantine = Math.round((totals.quarantine || 0) * filteredFactor);
@@ -153,8 +153,6 @@ export default function OverviewDashboardPreview() {
   const resetFilters = () => { setShift('all'); setProcess('all'); setModel('all'); setCondition('all'); setPeriod('7d'); setSiteSearch(''); setActiveQueue(''); };
 
   const siteRows = scopedSites.filter((s) => !siteSearch || s.site.toLowerCase().includes(siteSearch.toLowerCase()));
-  const scopeInventory = roleDef.kind === 'it' ? filteredIT : roleDef.kind === 'own' ? ROLE_STATS.assigned_employee.accountability : inventoryTotal;
-  const scale = roleDef.kind === 'own' ? ROLE_STATS.assigned_employee.accountability / 18 : roleDef.kind === 'it' ? (totals.it || 0) / 54 : 1;
   const own = ROLE_STATS.assigned_employee;
   const trend7 = [{ label: 'M', value: 18 }, { label: 'T', value: 26 }, { label: 'W', value: 22 }, { label: 'T', value: 31 }, { label: 'F', value: 28 }, { label: 'S', value: 36 }, { label: 'S', value: 29 }];
   const trend30 = [{ label: 'W1', value: 164 }, { label: 'W2', value: 188 }, { label: 'W3', value: 172 }, { label: 'W4', value: 216 }];
@@ -263,7 +261,7 @@ export default function OverviewDashboardPreview() {
           <button type="button" className="ovp-reset" onClick={resetFilters}><X size={14}/>Reset</button>
         </section>
 
-        <div className="ovp-data-note"><CircleHelp size={14}/><span>Illustrative data for layout review. Role selection changes the visible scope; it does not grant or change actual application permissions.</span><small>Sample refreshed {refreshed}</small></div>
+        <div className="ovp-data-note"><CircleHelp size={14}/><span>Illustrative data for layout review. Role selection changes the visible scope; it does not grant or change actual application permissions. Model and condition filter inventory counts; shift and process narrow GC/TL custody details.</span><small>Sample refreshed {refreshed}</small></div>
 
         {roleDef.kind === 'network' && <div className="ovp-network-strip"><div><span>NETWORK SCOPE</span><strong>{scopedSites.length} sites</strong></div><div><span>REGISTERED INVENTORY</span><strong>{fmt(totals.total)} devices</strong></div><div><span>OVERALL ALLOCATION COVERAGE</span><strong>{pct(averageCoverage)}</strong></div><div><span>AUDIT / RECONCILIATION FRESHNESS</span><strong>{pct(auditFresh)}</strong></div></div>}
 
@@ -277,7 +275,7 @@ export default function OverviewDashboardPreview() {
               <div className="ovp-dist-total"><strong>{fmt(inventoryTotal)}</strong><span>{isAllSites ? 'devices across current site scope' : 'registered devices at selected site'}</span></div>
               <StackedBar rows={distribution}/>
               <div className="ovp-legend">{distribution.map((r) => <div key={r.label}><span style={{background:r.color}}/><span>{r.label}</span><b>{fmt(r.value)}</b><small>{pct(distributionTotal ? r.value / distributionTotal * 100 : 0)}</small></div>)}</div>
-              <div className="ovp-explain"><ShieldCheck size={15}/><span>GC/TL counts are physical HOTO holders. Asset Manager/Ops desk is stock physically available at Operations. Site IT is separate department stock. Buckets do not overlap.</span></div>
+              <div className="ovp-explain"><ShieldCheck size={15}/><span>GC/TL counts are physical HOTO holders. Asset Manager/Ops desk is stock physically available at Operations. Site IT is separate department stock. Buckets do not overlap. Shift and process filters narrow the GC/TL slice; the site totals remain scope-level.</span></div>
             </Panel>
             <Panel title="Control actions requiring attention" subtitle="Prioritised by approval, dispatch, receipt and shift-close SLA" action={<Badge tone="warning">{fmt(actions.reduce((a, x) => a + (x.count || 0), 0))} open items</Badge>}>
               <div className="ovp-action-list">{actions.map((a) => <button type="button" key={a.id} className={'ovp-action-row ' + (activeQueue === a.id ? 'selected' : '')} onClick={() => setActiveQueue(activeQueue === a.id ? '' : a.id)}>
@@ -321,7 +319,7 @@ export default function OverviewDashboardPreview() {
 
         <section className="ovp-two-col ovp-middle">
           <Panel title={roleDef.kind === 'own' ? 'My device custody ledger' : roleDef.kind === 'it' ? 'STO receipt register' : 'Movement and HOTO trend'} subtitle={roleDef.kind === 'own' ? 'Sample device-level accountability, physical holder and health' : roleDef.kind === 'it' ? 'Device receipt must match an authorised STO line' : trendDesc} action={<Badge tone="muted">{period.toUpperCase()} WINDOW</Badge>}>
-            {roleDef.kind === 'own' ? <div className="ovp-table-wrap"><table><thead><tr><th>HHD</th><th>Current physical holder</th><th>Process / shift</th><th>Condition</th><th>Status</th><th>Last scan</th></tr></thead><tbody>{MY_DEVICES.filter((d) => (process === 'all' || d.process.toLowerCase() === process) && (shift === 'all' || d.shift === shift)).map((d) => <tr key={d.serial}><td><strong>{d.serial}</strong></td><td>{d.holder} <small>{d.type}</small></td><td>{d.process}<small>Shift {d.shift}</small></td><td><Badge tone={d.physical === 'Damaged' ? 'warning' : 'success'}>{d.physical} · {d.functional}</Badge></td><td><Badge tone={d.state === 'HOTO due' ? 'danger' : 'success'}>{d.state}</Badge></td><td>{d.last}</td></tr>)}</tbody></table></div>
+            {roleDef.kind === 'own' ? <div className="ovp-table-wrap"><table><thead><tr><th>HHD</th><th>Current physical holder</th><th>Process / shift</th><th>Condition</th><th>Status</th><th>Last scan</th></tr></thead><tbody>{MY_DEVICES.filter((d) => (process === 'all' || d.process.toLowerCase() === process) && (shift === 'all' || d.shift === shift) && (model === 'all' || d.model === model) && (condition === 'all' || (condition === 'good' && d.physical === 'Good' && d.functional === 'Working') || (condition === 'damaged' && d.physical === 'Damaged') || (condition === 'notworking' && d.functional === 'Not working'))).map((d) => <tr key={d.serial}><td><strong>{d.serial}</strong></td><td>{d.holder} <small>{d.type}</small></td><td>{d.process}<small>Shift {d.shift}</small></td><td><Badge tone={d.physical === 'Damaged' ? 'warning' : 'success'}>{d.physical} · {d.functional}</Badge></td><td><Badge tone={d.state === 'HOTO due' ? 'danger' : 'success'}>{d.state}</Badge></td><td>{d.last}</td></tr>)}</tbody></table></div>
               : roleDef.kind === 'it' ? <div className="ovp-table-wrap"><table><thead><tr><th>STO reference</th><th>Lines</th><th>From</th><th>Status</th><th>Age</th><th>Priority</th></tr></thead><tbody>{IT_STOS.map((r) => <tr key={r.sto}><td><strong>{r.sto}</strong></td><td>{r.devices}</td><td>{r.from}</td><td><Badge tone={r.status === 'Awaiting receipt' ? 'warning' : 'info'}>{r.status}</Badge></td><td>{r.age}</td><td><Badge tone={r.priority === 'Critical' ? 'danger' : r.priority === 'High' ? 'warning' : 'muted'}>{r.priority}</Badge></td></tr>)}</tbody></table></div>
               : <><MiniBars data={trend}/><div className="ovp-trend-foot"><span><i className="ovp-dot ovp-dot-teal"/> HOTO / STO movement events</span><span><i className="ovp-dot ovp-dot-violet"/> Includes issues, takeovers and transfers</span></div></>}
           </Panel>
