@@ -128,8 +128,7 @@ export default function OverviewDashboardPreview() {
   const conditionFactor = condition === 'good' ? 0.91 : condition === 'damaged' ? 0.06 : condition === 'notworking' ? 0.03 : 1;
   const filteredFactor = modelFactor * conditionFactor;
   const inventoryTotal = Math.round((totals.total || 0) * filteredFactor);
-  const processFactor = process === 'inbound' ? 0.36 : process === 'outbound' ? 0.31 : process === 'sortation' ? 0.24 : process === 'returns' ? 0.09 : 1;
-  const filteredOnGround = Math.round(onGround * filteredFactor * processFactor);
+  const filteredOnGround = Math.round(onGround * filteredFactor);
   const filteredOps = Math.round((totals.ops || 0) * filteredFactor);
   const filteredIT = Math.round((totals.it || 0) * filteredFactor);
   const filteredQuarantine = Math.round((totals.quarantine || 0) * filteredFactor);
@@ -222,7 +221,12 @@ export default function OverviewDashboardPreview() {
   const distributionTotal = distribution.reduce((a, x) => a + x.value, 0);
 
   const trendDesc = period === '7d' ? 'Daily HOTO and asset movement events' : period === '30d' ? 'Weekly HOTO and STO movement events' : 'Monthly movement trend';
-  const activeProcesses = processRows.map((r) => ({ ...r, gc: shift === 'all' ? r.gc : Math.round(r.gc * (shift === 'A' ? 0.36 : shift === 'B' ? 0.34 : 0.30)), tl: shift === 'all' ? r.tl : Math.round(r.tl * (shift === 'A' ? 0.36 : shift === 'B' ? 0.34 : 0.30)) }));
+  const activeProcesses = processRows.map((r) => {
+    const share = r.devices / 585;
+    const processDevices = Math.round(filteredOnGround * share);
+    const gc = Math.round(processDevices * r.gc / r.devices);
+    return { ...r, gc, tl: processDevices - gc, devices: processDevices, hoto: Math.round((totals.overdueHoto || 0) * share) };
+  });
 
   return (
     <div className="ovp-shell">
@@ -261,7 +265,7 @@ export default function OverviewDashboardPreview() {
           <button type="button" className="ovp-reset" onClick={resetFilters}><X size={14}/>Reset</button>
         </section>
 
-        <div className="ovp-data-note"><CircleHelp size={14}/><span>Illustrative data for layout review. Role selection changes the visible scope; it does not grant or change actual application permissions. Model and condition filter inventory counts; shift and process narrow GC/TL custody details.</span><small>Sample refreshed {refreshed}</small></div>
+        <div className="ovp-data-note"><CircleHelp size={14}/><span>Illustrative data for layout review. Role selection changes the visible scope; it does not grant or change actual application permissions. Model and condition filter inventory counts; shift narrows GC/TL custody; process filters the relevant detail list.</span><small>Sample refreshed {refreshed}</small></div>
 
         {roleDef.kind === 'network' && <div className="ovp-network-strip"><div><span>NETWORK SCOPE</span><strong>{scopedSites.length} sites</strong></div><div><span>REGISTERED INVENTORY</span><strong>{fmt(totals.total)} devices</strong></div><div><span>OVERALL ALLOCATION COVERAGE</span><strong>{pct(averageCoverage)}</strong></div><div><span>AUDIT / RECONCILIATION FRESHNESS</span><strong>{pct(auditFresh)}</strong></div></div>}
 
@@ -275,7 +279,7 @@ export default function OverviewDashboardPreview() {
               <div className="ovp-dist-total"><strong>{fmt(inventoryTotal)}</strong><span>{isAllSites ? 'devices across current site scope' : 'registered devices at selected site'}</span></div>
               <StackedBar rows={distribution}/>
               <div className="ovp-legend">{distribution.map((r) => <div key={r.label}><span style={{background:r.color}}/><span>{r.label}</span><b>{fmt(r.value)}</b><small>{pct(distributionTotal ? r.value / distributionTotal * 100 : 0)}</small></div>)}</div>
-              <div className="ovp-explain"><ShieldCheck size={15}/><span>GC/TL counts are physical HOTO holders. Asset Manager/Ops desk is stock physically available at Operations. Site IT is separate department stock. Buckets do not overlap. Shift and process filters narrow the GC/TL slice; the site totals remain scope-level.</span></div>
+              <div className="ovp-explain"><ShieldCheck size={15}/><span>GC/TL counts are physical HOTO holders. Asset Manager/Ops desk is stock physically available at Operations. Site IT is separate department stock. Buckets do not overlap. Shift filter narrows the GC/TL slice; process filter narrows the process detail list. The site totals remain scope-level.</span></div>
             </Panel>
             <Panel title="Control actions requiring attention" subtitle="Prioritised by approval, dispatch, receipt and shift-close SLA" action={<Badge tone="warning">{fmt(actions.reduce((a, x) => a + (x.count || 0), 0))} open items</Badge>}>
               <div className="ovp-action-list">{actions.map((a) => <button type="button" key={a.id} className={'ovp-action-row ' + (activeQueue === a.id ? 'selected' : '')} onClick={() => setActiveQueue(activeQueue === a.id ? '' : a.id)}>
